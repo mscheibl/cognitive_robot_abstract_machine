@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -22,7 +23,7 @@ from coraplex.language import SequentialNode
 from coraplex.execution_environment import simulated_robot
 from coraplex.plans.executables import Executable
 from coraplex.plans.factories import sequential, execute_single
-from coraplex.plans.failures import PlanFailure
+from coraplex.plans.failures import EmptyUnderspecified, PlanFailure
 from coraplex.plans.plan_node import ExecutionBoundaryNode, PlanNode
 from coraplex.robot_plans.actions.base import ActionDescription
 from coraplex.robot_plans.actions.core.navigation import NavigateAction
@@ -50,6 +51,12 @@ class TrialCall:
     """
     The value of the probed degree of freedom when this attempt started, so a test can
     tell whether a later trial copy reflects an earlier real failure's state.
+    """
+
+    entered_at: datetime
+    """
+    The wall-clock time this attempt started, so a test can place it within the span
+    of the node that tried it.
     """
 
 
@@ -150,6 +157,7 @@ class RecordingExecutable(Executable):
             TrialCall(
                 world=self.context.world,
                 position_at_entry=self.context.world.state[self.dof_id].position,
+                entered_at=datetime.now(),
             )
         )
         self.context.world.state[self.dof_id].position = len(probe.calls)
@@ -409,3 +417,57 @@ def test_real_failure_keeps_state_and_next_trial_reflects_it(
     assert probe.calls[3].position_at_entry == 2
 
     assert world.state[dof.id].position == 4
+
+
+# %% execution tracking of a nested underspecified node
+
+
+def test_nested_underspecified_node_spans_its_candidate_trials(
+    apartment_world_pr2_copy_with_context,
+):
+    """
+    An underspecified node below another node tracks its own execution, and its span
+    covers the search for a candidate as well as the accepted candidate's real attempt.
+    """
+    world, robot, context = apartment_world_pr2_copy_with_context
+    dof = world.degrees_of_freedom[0]
+    probe_key = register_probe()
+
+    action = a(RecordingAction)(
+        probe_key=probe_key,
+        dof_id=dof.id,
+        fail_on_attempt_number=variable_from([1, None]),
+    )
+    plan = sequential([action], context=context).plan
+    with simulated_robot:
+        plan.perform()
+
+    [underspecified_node] = plan.root.children
+    probe = _registered_probes[probe_key]
+    assert underspecified_node.status == LifeCycleValues.SUCCEEDED
+    assert underspecified_node.start_time <= probe.calls[0].entered_at
+    assert underspecified_node.end_time >= probe.calls[-1].entered_at
+
+
+def test_nested_underspecified_node_without_surviving_candidate_fails(
+    apartment_world_pr2_copy_with_context,
+):
+    """
+    An underspecified node below another node whose every candidate fails its trial ends
+    as failed, rather than looking as if it never started.
+    """
+    world, robot, context = apartment_world_pr2_copy_with_context
+    dof = world.degrees_of_freedom[0]
+    probe_key = register_probe()
+
+    action = a(RecordingAction)(
+        probe_key=probe_key,
+        dof_id=dof.id,
+        fail_on_attempt_number=variable_from([1, 2]),
+    )
+    plan = sequential([action], context=context).plan
+    with simulated_robot, pytest.raises(EmptyUnderspecified):
+        plan.perform()
+
+    [underspecified_node] = plan.root.children
+    assert underspecified_node.status == LifeCycleValues.FAILED

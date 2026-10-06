@@ -467,6 +467,9 @@ class UnderspecifiedExecutable(Executable):
     gripper). Candidates are tried in order until one executes without raising a
     :class:`~pycram.plans.failures.PlanFailure`; if the generator is exhausted,
     :class:`~pycram.plans.failures.EmptyUnderspecified` is raised.
+
+    The node tracks its own execution, so its span covers the search for a candidate
+    as well as the candidate's execution.
     """
 
     node: UnderspecifiedNode = field(kw_only=True)
@@ -477,11 +480,12 @@ class UnderspecifiedExecutable(Executable):
     def execute(self) -> None:
         from coraplex.plans.failures import PlanFailure, EmptyUnderspecified
 
-        while self.node.advance():
-            try:
-                self.node.current_candidate_sequence.parse().execute()
-                self.node.stop_grounding()
-                return
-            except PlanFailure:
-                continue
-        raise EmptyUnderspecified()
+        with self.node.execution_scope():
+            while self.node.advance():
+                try:
+                    self.node.current_candidate_sequence.parse().execute()
+                    self.node.stop_grounding()
+                    return
+                except PlanFailure:
+                    continue
+            raise EmptyUnderspecified()
