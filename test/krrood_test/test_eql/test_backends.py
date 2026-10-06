@@ -33,6 +33,7 @@ from krrood.entity_query_language.factories import (
     a,
     an,
     variable_from,
+    distribution_of,
 )
 from krrood.entity_query_language.query_graph import QueryGraph
 from krrood.ormatic.data_access_objects.helper import to_dao
@@ -40,6 +41,7 @@ from krrood.entity_query_language.core.variable import Variable as KRROODVariabl
 from krrood.parametrization.model_registries import DictRegistry
 from krrood.parametrization.parameterizer import UnderspecifiedParameters
 from random_events.interval import reals
+from random_events.product_algebra import SimpleEvent
 from random_events.set import Set
 from random_events.variable import Symbolic
 from ..dataset.example_classes import (
@@ -207,6 +209,58 @@ def test_enum_value_as_literal():
     values = list(prob_q.evaluate(backend=pm_backend))
     for value in values:
         assert value.enum == TestEnum.OPTION_A
+
+
+def test_enum_candidates_from_a_variable_are_the_only_possible_values():
+    """
+    Enum members given as the domain of a variable restrict the enum attribute to
+    exactly those members, with no probability left for the other members of the enum.
+    """
+    candidates = [TestEnum.OPTION_A, TestEnum.OPTION_B]
+    query = a(EnumAction)(obj=Body("x"), enum=variable_from(candidates))
+
+    distribution = distribution_of(query, marginalize_for=(query.enum,)).first(
+        backend=ProbabilisticBackend()
+    )
+    [enum_variable] = distribution.variables
+
+    def probability_of_member(member: TestEnum) -> float:
+        event = SimpleEvent.from_data({enum_variable: Set.from_iterable([member])})
+        return distribution.probability(event.as_composite_set())
+
+    assert {member: probability_of_member(member) for member in TestEnum} == {
+        TestEnum.OPTION_A: pytest.approx(0.5),
+        TestEnum.OPTION_B: pytest.approx(0.5),
+        TestEnum.OPTION_C: pytest.approx(0.0),
+    }
+
+
+def test_enum_candidates_from_a_variable_are_the_only_sampled_values():
+    """
+    Sampling an enum attribute whose candidates are given as the domain of a variable
+    yields only those members.
+    """
+    candidates = [TestEnum.OPTION_A, TestEnum.OPTION_B]
+    query = an(EnumAction)(obj=Body("x"), enum=variable_from(candidates))
+
+    values = list(query.evaluate(backend=ProbabilisticBackend(number_of_samples=10)))
+
+    assert len(values) == 10
+    assert {value.enum for value in values} <= set(candidates)
+
+
+def test_float_candidates_from_a_variable_are_the_only_sampled_values():
+    """
+    Floats given as the domain of a variable restrict the float attribute to exactly
+    those values.
+    """
+    candidates = [0.0, 1.0]
+    query = a(KRROODPosition)(x=variable_from(candidates), y=..., z=0.0)
+
+    values = list(query.evaluate(backend=ProbabilisticBackend(number_of_samples=10)))
+
+    assert len(values) == 10
+    assert {value.x for value in values} <= set(candidates)
 
 
 def test_probabilistic_query_backend():

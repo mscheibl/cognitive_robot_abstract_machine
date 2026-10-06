@@ -575,9 +575,7 @@ class UnderspecifiedParameters(ModelQueryParameters):
             value.
         :return: A dictionary of extracted variables.
         """
-        type_ = self._process_attribute_match_type(
-            attribute_match.assigned_variable._type_
-        )
+        type_ = self._assigned_variable_type(attribute_match)
         if attribute_match.assigned_value in self._symbolic_expression_event_cache:
             return self._symbolic_expression_event_cache[
                 attribute_match.assigned_value
@@ -588,9 +586,9 @@ class UnderspecifiedParameters(ModelQueryParameters):
         if not domain_objects:
             raise EmptyVariableDomain(attribute_match._variable_)
 
-        if not type_ is None and issubclass(type_, compatible_types):
+        if self._is_primitive(type_):
             return self._extract_variables_from_primitive_krrood_variable(
-                attribute_match, domain_objects
+                attribute_match, domain_objects, type_
             )
 
         return self._extract_variables_from_non_primitive_krrood_variable(
@@ -598,19 +596,17 @@ class UnderspecifiedParameters(ModelQueryParameters):
         )
 
     def _extract_variables_from_primitive_krrood_variable(
-        self, attribute_match: AttributeMatch, domain_objects: list[Any]
+        self, attribute_match: AttributeMatch, domain_objects: list[Any], type_: Type
     ) -> dict[str, random_events.variable.Variable]:
         """
         Extract variables from a KRROOD variable with a primitive type.
 
         :param attribute_match: The attribute match.
         :param domain_objects: The objects in the variable's domain.
+        :param type_: The primitive type of the variable's values.
         :return: A dictionary of extracted variables.
         """
         name = attribute_match.name_from_variable_access_path
-        type_ = self._process_attribute_match_type(
-            attribute_match.assigned_variable._type_
-        )
         re_variable = variable_from_name_and_type(name=name, type_=type_)
         result = {re_variable.name: re_variable}
 
@@ -711,10 +707,14 @@ class UnderspecifiedParameters(ModelQueryParameters):
             if mapped_variable is None:
                 continue
 
-            if (
-                attribute_match
-                and isinstance(attribute_match.assigned_value, SymbolicExpression)
+            if variable_.is_numeric:
+                value = value.item()
+            elif (
+                isinstance(attribute_match.assigned_value, SymbolicExpression)
                 and not isinstance(attribute_match.assigned_value, Literal)
+                and not self._is_primitive(
+                    self._assigned_variable_type(attribute_match)
+                )
             ):
                 [domain_index] = [
                     val
@@ -726,19 +726,40 @@ class UnderspecifiedParameters(ModelQueryParameters):
                     for domain_value in attribute_match.assigned_value.tolist()
                     if hash(domain_value) == domain_index
                 ]
-            elif not variable_.is_numeric:
+            else:
                 [value] = [
                     domain_value.element
                     for domain_value in variable_.domain
                     if hash(domain_value) == value
                 ]
-            else:
-                value = value.item()
             mapped_variable._value_ = value
 
         self.statement._update_kwargs_from_literal_values()
         result = self.statement.construct_instance()
         return result
+
+    def _assigned_variable_type(
+        self, attribute_match: AttributeMatch
+    ) -> Optional[Type]:
+        """
+        :param attribute_match: An attribute match with a KRROOD variable assigned
+            value.
+        :return: The type of the values the assigned variable takes. A variable
+            without a type of its own, such as one made by ``variable_from``, takes the
+            type of the attribute it is assigned to.
+        """
+        return self._process_attribute_match_type(
+            attribute_match.assigned_variable._type_ or attribute_match._type_
+        )
+
+    @staticmethod
+    def _is_primitive(type_: Optional[Type]) -> bool:
+        """
+        :param type_: A type of values, or None if it is unknown.
+        :return: Whether values of the type are expressed directly as a random events
+            variable, rather than through the features of their data access objects.
+        """
+        return type_ is not None and issubclass(type_, compatible_types)
 
     @staticmethod
     def _process_attribute_match_type(type_):
