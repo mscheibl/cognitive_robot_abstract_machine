@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import pytest
 from uuid import UUID, uuid4
@@ -57,6 +58,12 @@ class TrialCall:
     """
     The value of the probed degree of freedom when this attempt started, so a test can
     tell whether a later trial copy reflects an earlier real failure's state.
+    """
+
+    entered_at: datetime
+    """
+    The wall-clock time this attempt started, so a test can place it within the span
+    of the node that tried it.
     """
 
 
@@ -157,6 +164,7 @@ class RecordingExecutable(Executable):
             TrialCall(
                 world=self.context.world,
                 position_at_entry=self.context.world.state[self.dof_id].position,
+                entered_at=datetime.now(),
             )
         )
         self.context.world.state[self.dof_id].position = len(probe.calls)
@@ -542,6 +550,60 @@ def test_a_trial_catches_its_copy_up_with_what_the_world_gained(
     assert caught_up is copied
     assert caught_up.get_kinematic_structure_entity_by_id(body.id).name == body.name
     trial.discard()
+
+
+# %% execution tracking of a nested underspecified node
+
+
+def test_nested_underspecified_node_spans_its_candidate_trials(
+    apartment_world_pr2_copy_with_context,
+):
+    """
+    An underspecified node below another node tracks its own execution, and its span
+    covers the search for a candidate as well as the accepted candidate's real attempt.
+    """
+    world, robot, context = apartment_world_pr2_copy_with_context
+    dof = world.degrees_of_freedom[0]
+    probe_key = register_probe()
+
+    action = a(RecordingAction)(
+        probe_key=probe_key,
+        dof_id=dof.id,
+        fail_on_attempt_number=variable_from([1, None]),
+    )
+    plan = sequential([action], context=context).plan
+    with simulated_robot:
+        plan.perform()
+
+    [underspecified_node] = plan.root.children
+    probe = _registered_probes[probe_key]
+    assert underspecified_node.status == LifeCycleValues.SUCCEEDED
+    assert underspecified_node.start_time <= probe.calls[0].entered_at
+    assert underspecified_node.end_time >= probe.calls[-1].entered_at
+
+
+def test_nested_underspecified_node_without_surviving_candidate_fails(
+    apartment_world_pr2_copy_with_context,
+):
+    """
+    An underspecified node below another node whose every candidate fails its trial ends
+    as failed, rather than looking as if it never started.
+    """
+    world, robot, context = apartment_world_pr2_copy_with_context
+    dof = world.degrees_of_freedom[0]
+    probe_key = register_probe()
+
+    action = a(RecordingAction)(
+        probe_key=probe_key,
+        dof_id=dof.id,
+        fail_on_attempt_number=variable_from([1, 2]),
+    )
+    plan = sequential([action], context=context).plan
+    with simulated_robot, pytest.raises(EmptyUnderspecified):
+        plan.perform()
+
+    [underspecified_node] = plan.root.children
+    assert underspecified_node.status == LifeCycleValues.FAILED
 
 
 # %% how many candidates a step tries

@@ -512,6 +512,9 @@ class UnderspecifiedExecutable(Executable):
     :class:`~pycram.plans.failures.PlanFailure`; if the node gives up after its candidate
     limit, :class:`~coraplex.plans.failures.CandidateLimitReached` is raised, and if the
     generator is exhausted before, :class:`~pycram.plans.failures.EmptyUnderspecified`.
+
+    The node tracks its own execution, so its span covers the search for a candidate
+    as well as the candidate's execution.
     """
 
     node: UnderspecifiedNode = field(kw_only=True)
@@ -520,13 +523,14 @@ class UnderspecifiedExecutable(Executable):
     """
 
     def execute(self) -> None:
-        while self.node.advance():
-            try:
-                self.node.current_candidate_sequence.parse().execute()
-                self.node.stop_grounding()
-                return
-            except PlanFailure:
-                continue
-        if self.node.reached_candidate_limit:
-            raise CandidateLimitReached(self.node, self.node.candidate_limit)
-        raise EmptyUnderspecified()
+        with self.node.execution_scope():
+            while self.node.advance():
+                try:
+                    self.node.current_candidate_sequence.parse().execute()
+                    self.node.stop_grounding()
+                    return
+                except PlanFailure:
+                    continue
+            if self.node.reached_candidate_limit:
+                raise CandidateLimitReached(self.node, self.node.candidate_limit)
+            raise EmptyUnderspecified()
