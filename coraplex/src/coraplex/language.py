@@ -249,7 +249,7 @@ class RepeatNode(ExecutesSequentially):
 @dataclass(eq=False)
 class TryInOrderNode(ExecutesSequentially):
     """
-    Tries all children in order sequentially and fails if all children fail.
+    Tries the children in order until one succeeds and fails if all children fail.
     """
 
     motion_state_chart_template: Type[NodeListGoal] = field(
@@ -262,11 +262,8 @@ class TryInOrderNode(ExecutesSequentially):
                 child.perform()
             except PlanFailure:
                 continue
-        failed = all(
-            [child.status == LifeCycleValues.FAILED for child in self.children]
-        )
-        if failed:
-            raise AllChildrenFailed(self)
+            return
+        raise AllChildrenFailed(self)
 
 
 @dataclass(eq=False)
