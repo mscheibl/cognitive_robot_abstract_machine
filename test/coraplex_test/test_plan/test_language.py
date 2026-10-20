@@ -259,6 +259,36 @@ def test_exception_try_in_order(pr2_apartment_context):
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
+def test_try_in_order_stops_at_the_first_child_that_succeeds(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    ran = []
+
+    plan = try_in_order(
+        [code(lambda: ran.append("first")), code(lambda: ran.append("second"))],
+        context,
+    ).plan
+    with simulated_robot:
+        plan.perform()
+
+    assert ran == ["first"]
+    assert plan.root.status == LifeCycleValues.SUCCEEDED
+
+
+def test_try_in_order_tries_the_next_child_after_a_failure(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    ran = []
+
+    def fail():
+        ran.append("first")
+        raise PlanFailure()
+
+    plan = try_in_order([code(fail), code(lambda: ran.append("second"))], context).plan
+    with simulated_robot:
+        plan.perform()
+
+    assert ran == ["first", "second"]
+
+
 def test_exception_try_all(pr2_apartment_context):
     world, robot_view, context = pr2_apartment_context
 
