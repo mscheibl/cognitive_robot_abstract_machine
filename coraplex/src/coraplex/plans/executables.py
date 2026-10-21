@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, ExitStack, nullcontext
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
-from typing_extensions import Callable, List, Dict, ClassVar, Optional, TYPE_CHECKING
+from typing_extensions import (
+    Any,
+    Callable,
+    List,
+    Dict,
+    ClassVar,
+    Optional,
+    TYPE_CHECKING,
+)
 
 from coraplex.datastructures.enums import ExecutionType
 from coraplex.exceptions import (
@@ -12,6 +21,7 @@ from coraplex.exceptions import (
     UnknownExecutionType,
 )
 from coraplex.plans.failures import (
+    AllChildrenFailed,
     CandidateLimitReached,
     EmptyUnderspecified,
     MotionExceededSimulationTimeLimit,
@@ -52,6 +62,7 @@ if TYPE_CHECKING:
     from coraplex.plans.condition_nodes import ConditionNode
     from coraplex.plans.plan_node import MotionNode
     from coraplex.plans.underspecified import UnderspecifiedNode
+    from coraplex.language import ExecutesInParallel, TryInOrderNode
     from coraplex.datastructures.dataclasses import Context
 
 
@@ -593,3 +604,119 @@ class UnderspecifiedExecutable(Executable):
             if self.node.reached_candidate_limit:
                 raise CandidateLimitReached(self.node, self.node.candidate_limit)
             raise EmptyUnderspecified()
+
+
+@dataclass
+class TryInOrderExecutable(Executable):
+    """
+    Executable that runs the executables in :attr:`execution_list`, one per child of
+    :attr:`node`, one after another until one of them succeeds.
+
+    Raises :class:`~coraplex.plans.failures.AllChildrenFailed` if every one of them
+    raises a :class:`~coraplex.plans.failures.PlanFailure`.
+    """
+
+    node: TryInOrderNode = field(kw_only=True)
+    """
+    The node whose children are tried.
+    """
+
+    def execute(self) -> None:
+        with self.node.execution_scope():
+            for child, executable in zip(self.node.children, self.execution_list):
+                try:
+                    executable.execute()
+                except PlanFailure:
+                    continue
+                if child.failure is None:
+                    return
+            raise AllChildrenFailed(self.node)
+
+
+@dataclass
+class ParallelExecutable(Executable):
+    """
+    Executable that runs the executables in :attr:`execution_list`, one per child of
+    :attr:`node`, at the same time, each in its own thread, and raises the failure of
+    the first child that failed once all of them ended.
+    """
+
+    node: ExecutesInParallel = field(kw_only=True)
+    """
+    The node whose children are run.
+    """
+
+    def execute(self) -> None:
+        with self.node.execution_scope():
+            with ThreadPoolExecutor(max_workers=len(self.execution_list)) as pool:
+                futures = [
+                    pool.submit(executable.execute)
+                    for executable in self.execution_list
+                ]
+            self.raise_failure(
+                [
+                    future.exception() or child.failure
+                    for child, future in zip(self.node.children, futures)
+                ]
+            )
+
+    def raise_failure(self, errors: list[BaseException | None]) -> None:
+        """
+        Raise the failure the run as a whole ends with, if any.
+
+        :param errors: What each child failed with, in the order of
+            :attr:`execution_list`; None for one that succeeded.
+        """
+        failure = next((error for error in errors if error is not None), None)
+        if failure is not None:
+            raise failure
+
+
+@dataclass
+class TryAllExecutable(ParallelExecutable):
+    """
+    Executable that runs the executables in :attr:`execution_list` at the same time and
+    raises :class:`~coraplex.plans.failures.AllChildrenFailed` only if every one of them
+    raised a :class:`~coraplex.plans.failures.PlanFailure`.
+    """
+
+    def raise_failure(self, errors: list[BaseException | None]) -> None:
+        """
+        Raise an error that is not a :class:`~coraplex.plans.failures.PlanFailure`, or
+        :class:`~coraplex.plans.failures.AllChildrenFailed` if every executable failed.
+        """
+        unexpected_error = next(
+            (
+                error
+                for error in errors
+                if error is not None and not isinstance(error, PlanFailure)
+            ),
+            None,
+        )
+        if unexpected_error is not None:
+            raise unexpected_error
+        if all(error is not None for error in errors):
+            raise AllChildrenFailed(self.node)
+
+
+@dataclass
+class CodeExecutable(Executable):
+    """
+    Executable that calls a function when the plan reaches it.
+    """
+
+    function: Callable[[], Any] = field(kw_only=True)
+    """
+    The function that is called.
+    """
+
+    execution_scope: Callable[[], AbstractContextManager[None]] = field(
+        default=nullcontext, kw_only=True, repr=False, compare=False
+    )
+    """
+    Tracks the execution of the node this executable was parsed from.
+    """
+
+    def execute(self) -> None:
+        with self.execution_scope():
+            self.function()

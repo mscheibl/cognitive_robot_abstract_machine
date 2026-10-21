@@ -10,6 +10,8 @@ regenerate_orm_interfaces()
 
 from functools import partial
 
+from typing_extensions import Iterator
+
 import numpy as np
 import pytest
 
@@ -41,6 +43,7 @@ from semantic_digital_twin.robots.stretch import Stretch
 from semantic_digital_twin.spatial_types import HomogeneousTransformationMatrix
 from semantic_digital_twin.world_description.geometry import VolumetricBoundingBox
 
+from .recording_action import _registered_probes
 from .world_snapshot import WorldSnapshot
 from semantic_digital_twin.robots.robot_parts import AbstractRobot, Arm
 
@@ -168,3 +171,18 @@ def whole_scene_region(pr2_apartment_context) -> VolumetricBoundingBox:
         max_y=10,
         max_z=10,
     )
+
+
+# %% probes of recorded actions
+
+
+@pytest.fixture(autouse=True)
+def release_registered_probes() -> Iterator[None]:
+    """
+    Drop every probe a test registered once it has finished.
+
+    A probe keeps the worlds its calls ran against, so a probe left registered would
+    keep them in memory for the rest of the session.
+    """
+    yield
+    _registered_probes.clear()
