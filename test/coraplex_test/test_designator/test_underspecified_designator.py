@@ -583,7 +583,7 @@ def test_nested_underspecified_node_spans_its_candidate_trials(
         fail_on_attempt_number=variable_from([1, None]),
     )
     plan = sequential([action], context=context).plan
-    with simulated_robot:
+    with kinematically_simulated_robot:
         plan.perform()
 
     [underspecified_node] = plan.root.children
@@ -610,7 +610,7 @@ def test_nested_underspecified_node_without_surviving_candidate_fails(
         fail_on_attempt_number=variable_from([1, 2]),
     )
     plan = sequential([action], context=context).plan
-    with simulated_robot, pytest.raises(EmptyUnderspecified):
+    with kinematically_simulated_robot, pytest.raises(EmptyUnderspecified):
         plan.perform()
 
     [underspecified_node] = plan.root.children
