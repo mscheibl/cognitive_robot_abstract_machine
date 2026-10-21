@@ -9,7 +9,12 @@ from giskardpy.motion_statechart.data_types import LifeCycleValues
 
 from coraplex.datastructures.enums import DetectionTechnique
 
-from coraplex.plans.failures import PlanCancelled, PlanFailure, RepetitionsExhausted
+from coraplex.plans.failures import (
+    AllChildrenFailed,
+    PlanCancelled,
+    PlanFailure,
+    RepetitionsExhausted,
+)
 from coraplex.language import (
     CancelMonitor,
     SequentialNode,
@@ -40,6 +45,8 @@ from giskardpy.motion_statechart.nodes_for_testing.nodes_for_testing import (
 from semantic_digital_twin.datastructures.definitions import TorsoState
 from semantic_digital_twin.spatial_types import Pose
 from semantic_digital_twin.robots.pr2 import PR2Joint
+
+from ..recording_action import RecordingAction, _registered_probes, register_probe
 
 
 def test_factory_construction():
@@ -259,6 +266,114 @@ def test_exception_try_in_order(pr2_apartment_context):
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
+def test_try_in_order_stops_at_the_first_child_that_succeeds(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    first_probe_key, second_probe_key = register_probe(), register_probe()
+
+    plan = try_in_order(
+        [
+            RecordingAction(probe_key=first_probe_key, dof_id=dof.id),
+            RecordingAction(probe_key=second_probe_key, dof_id=dof.id),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    assert len(_registered_probes[first_probe_key].calls) == 1
+    assert _registered_probes[second_probe_key].calls == []
+    assert plan.root.status == LifeCycleValues.SUCCEEDED
+
+
+def test_try_in_order_tries_the_next_child_after_a_failure(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    first_probe_key, second_probe_key = register_probe(), register_probe()
+
+    plan = try_in_order(
+        [
+            RecordingAction(
+                probe_key=first_probe_key, dof_id=dof.id, fail_on_attempt_number=1
+            ),
+            RecordingAction(probe_key=second_probe_key, dof_id=dof.id),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    assert len(_registered_probes[first_probe_key].calls) == 1
+    assert len(_registered_probes[second_probe_key].calls) == 1
+    assert plan.root.status == LifeCycleValues.SUCCEEDED
+
+
+def test_try_in_order_fails_once_every_child_failed(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    first_probe_key, second_probe_key = register_probe(), register_probe()
+
+    plan = try_in_order(
+        [
+            RecordingAction(
+                probe_key=first_probe_key, dof_id=dof.id, fail_on_attempt_number=1
+            ),
+            RecordingAction(
+                probe_key=second_probe_key, dof_id=dof.id, fail_on_attempt_number=1
+            ),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot, pytest.raises(AllChildrenFailed):
+        plan.perform()
+
+    assert len(_registered_probes[first_probe_key].calls) == 1
+    assert len(_registered_probes[second_probe_key].calls) == 1
+
+
+def test_try_in_order_runs_after_the_steps_before_it(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    step_probe_key, alternative_probe_key = register_probe(), register_probe()
+
+    plan = sequential(
+        [
+            RecordingAction(probe_key=step_probe_key, dof_id=dof.id),
+            try_in_order(
+                [RecordingAction(probe_key=alternative_probe_key, dof_id=dof.id)]
+            ),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    step_calls = _registered_probes[step_probe_key].calls
+    [alternative_call] = _registered_probes[alternative_probe_key].calls
+    position_written_by_step = len(step_calls)
+    assert alternative_call.position_at_entry == position_written_by_step
+
+
+def test_code_runs_when_the_plan_reaches_it(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    probe_key = register_probe()
+    positions_seen_by_code = []
+
+    plan = sequential(
+        [
+            RecordingAction(probe_key=probe_key, dof_id=dof.id),
+            code(lambda: positions_seen_by_code.append(world.state[dof.id].position)),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    assert positions_seen_by_code == [world.state[dof.id].position]
+    assert len(_registered_probes[probe_key].calls) == 1
+
+
 def test_exception_try_all(pr2_apartment_context):
     world, robot_view, context = pr2_apartment_context
 
@@ -274,6 +389,98 @@ def test_exception_try_all(pr2_apartment_context):
 
     assert type(plan.root) is TryAllNode
     assert plan.root.status == LifeCycleValues.SUCCEEDED
+
+
+def test_parallel_runs_each_child_once(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    first_dof, second_dof = world.degrees_of_freedom[:2]
+    first_probe_key, second_probe_key = register_probe(), register_probe()
+
+    plan = parallel(
+        [
+            RecordingAction(probe_key=first_probe_key, dof_id=first_dof.id),
+            RecordingAction(probe_key=second_probe_key, dof_id=second_dof.id),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    assert len(_registered_probes[first_probe_key].calls) == 1
+    assert len(_registered_probes[second_probe_key].calls) == 1
+    assert plan.root.status == LifeCycleValues.SUCCEEDED
+
+
+def test_parallel_runs_after_the_steps_before_it(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    step_probe_key, concurrent_probe_key = register_probe(), register_probe()
+
+    plan = sequential(
+        [
+            RecordingAction(probe_key=step_probe_key, dof_id=dof.id),
+            parallel([RecordingAction(probe_key=concurrent_probe_key, dof_id=dof.id)]),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    step_calls = _registered_probes[step_probe_key].calls
+    [concurrent_call] = _registered_probes[concurrent_probe_key].calls
+    position_written_by_step = len(step_calls)
+    assert concurrent_call.position_at_entry == position_written_by_step
+
+
+def test_try_all_runs_each_child_once(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    first_dof, second_dof = world.degrees_of_freedom[:2]
+    first_probe_key, second_probe_key = register_probe(), register_probe()
+
+    plan = try_all(
+        [
+            RecordingAction(
+                probe_key=first_probe_key,
+                dof_id=first_dof.id,
+                fail_on_attempt_number=1,
+            ),
+            RecordingAction(probe_key=second_probe_key, dof_id=second_dof.id),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    assert len(_registered_probes[first_probe_key].calls) == 1
+    assert len(_registered_probes[second_probe_key].calls) == 1
+    assert plan.root.status == LifeCycleValues.SUCCEEDED
+
+
+def test_try_all_fails_once_every_child_failed(pr2_apartment_context):
+    world, robot_view, context = pr2_apartment_context
+    first_dof, second_dof = world.degrees_of_freedom[:2]
+    first_probe_key, second_probe_key = register_probe(), register_probe()
+
+    plan = try_all(
+        [
+            RecordingAction(
+                probe_key=first_probe_key,
+                dof_id=first_dof.id,
+                fail_on_attempt_number=1,
+            ),
+            RecordingAction(
+                probe_key=second_probe_key,
+                dof_id=second_dof.id,
+                fail_on_attempt_number=1,
+            ),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot, pytest.raises(AllChildrenFailed):
+        plan.perform()
+
+    assert len(_registered_probes[first_probe_key].calls) == 1
+    assert len(_registered_probes[second_probe_key].calls) == 1
 
 
 # %% monitored subtrees

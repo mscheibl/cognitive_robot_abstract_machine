@@ -307,6 +307,15 @@ class PlanNode(PlanEntity):
             parent.status == LifeCycleValues.PAUSED for parent in [self] + self.path
         )
 
+    @property
+    def failure(self) -> BaseException | None:
+        """
+        :return: What this node failed with, or None if it did not fail.
+        """
+        if self.status != LifeCycleValues.FAILED:
+            return None
+        return self.execution_error or self.reason or PlanFailure()
+
     def perform(self):
         """
         Perform the node and update the fields of this node.

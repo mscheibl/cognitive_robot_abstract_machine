@@ -2,18 +2,15 @@
 from __future__ import annotations
 
 import logging
-import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing_extensions import (
     Any,
     Callable,
-    List,
     Optional,
     Type,
 )
 
-from giskardpy.motion_statechart.data_types import LifeCycleValues
 from giskardpy.motion_statechart.goals.templates import (
     CancelledWhenTrue,
     NodeListGoal,
@@ -35,17 +32,19 @@ from giskardpy.motion_statechart.monitors.templates import (
     PausedWhileTrue,
 )
 from coraplex.plans.executables import (
+    CodeExecutable,
     GiskardExecutable,
     Executable,
+    ParallelExecutable,
+    TryAllExecutable,
+    TryInOrderExecutable,
 )
 from coraplex.plans.failures import (
-    AllChildrenFailed,
     PlanCancelled,
-    PlanFailure,
     RepetitionsExhausted,
 )
 from coraplex.plans.motion_state_chart_building import BuildsMotionStateChart
-from coraplex.plans.plan_node import PlanNode
+from coraplex.plans.plan_node import ExecutionBoundaryNode, PlanNode
 
 logger = logging.getLogger(__name__)
 
@@ -112,24 +111,6 @@ class ExecutesInParallel(LanguageNode, ABC):
     Base class for nodes that execute their children in parallel.
     """
 
-    @classmethod
-    def _perform_parallel(cls, nodes: List[PlanNode]):
-        """
-        Open threads for all nodes and wait for them to finish.
-
-        :param nodes: A list of nodes which should be performed in parallel
-        """
-        threads = []
-        for child in nodes:
-            thread = threading.Thread(
-                target=child.perform,
-            )
-            thread.start()
-            threads.append(thread)
-
-        for thread in threads:
-            thread.join()
-
 
 @dataclass
 class SequentialNode(ExecutesSequentially):
@@ -147,21 +128,23 @@ class SequentialNode(ExecutesSequentially):
 @dataclass
 class ParallelNode(ExecutesInParallel):
     """
-    Executes all children in parallel by creating a thread per children and executing
-    them in the respective thread.
+    Executes all children in parallel, each in its own thread.
 
-    All exceptions are raised after all children have finished.
+    The first failure is raised after all children have finished.
     """
 
     motion_state_chart_template: Type[NodeListGoal] = field(
         kw_only=True, default=Parallel
     )
 
-    def notify(self):
-        self._perform_parallel(self.children)
-        for child in self.children:
-            if child.status == LifeCycleValues.FAILED:
-                raise child.execution_error or child.reason or PlanFailure()
+    def parse(self) -> Executable:
+        if not self.contains_execution_boundary:
+            return super().parse()
+        return ParallelExecutable(
+            execution_list=[child.parse() for child in self.children],
+            node=self,
+            context=self.context,
+        )
 
 
 @dataclass(eq=False)
@@ -249,24 +232,21 @@ class RepeatNode(ExecutesSequentially):
 @dataclass(eq=False)
 class TryInOrderNode(ExecutesSequentially):
     """
-    Tries all children in order sequentially and fails if all children fail.
+    Tries the children in order until one succeeds and fails if all children fail.
     """
 
     motion_state_chart_template: Type[NodeListGoal] = field(
         kw_only=True, default=TryInOrder
     )
 
-    def notify(self):
-        for child in self.children:
-            try:
-                child.perform()
-            except PlanFailure:
-                continue
-        failed = all(
-            [child.status == LifeCycleValues.FAILED for child in self.children]
+    def parse(self) -> Executable:
+        if not self.contains_execution_boundary:
+            return super().parse()
+        return TryInOrderExecutable(
+            execution_list=[child.parse() for child in self.children],
+            node=self,
+            context=self.context,
         )
-        if failed:
-            raise AllChildrenFailed(self)
 
 
 @dataclass(eq=False)
@@ -281,13 +261,14 @@ class TryAllNode(ExecutesInParallel):
         kw_only=True, default=TryAll
     )
 
-    def notify(self):
-        self._perform_parallel(self.children)
-        failed = all(
-            [child.status == LifeCycleValues.FAILED for child in self.children]
+    def parse(self) -> Executable:
+        if not self.contains_execution_boundary:
+            return super().parse()
+        return TryAllExecutable(
+            execution_list=[child.parse() for child in self.children],
+            node=self,
+            context=self.context,
         )
-        if failed:
-            raise AllChildrenFailed(self)
 
 
 @dataclass(eq=False)
@@ -382,14 +363,21 @@ class PauseUntilMonitor(MonitorNode):
 
 
 @dataclass
-class CodeNode(LanguageNode):
+class CodeNode(ExecutionBoundaryNode):
     """
-    Executable function in a plan.
+    A function that is called when the plan reaches it.
 
     This class' primary purpose is for debugging and testing.
     """
 
-    code: Callable = field(default_factory=lambda: lambda: None, kw_only=True)
+    code: Callable[[], Any] = field(default_factory=lambda: lambda: None, kw_only=True)
+    """
+    The function that is called.
+    """
 
-    def notify(self) -> Any:
-        return self.code()
+    def parse(self) -> CodeExecutable:
+        return CodeExecutable(
+            context=self.context,
+            function=self.code,
+            execution_scope=self.execution_scope,
+        )
