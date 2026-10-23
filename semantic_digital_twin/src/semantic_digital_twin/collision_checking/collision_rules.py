@@ -33,7 +33,10 @@ from semantic_digital_twin.collision_checking.collision_matrix import (
 if TYPE_CHECKING:
     from semantic_digital_twin.world import World
     from semantic_digital_twin.robots.robot_parts import AbstractRobot, EndEffector
-    from semantic_digital_twin.world_description.world_entity import Body
+    from semantic_digital_twin.world_description.world_entity import (
+        Body,
+        KinematicStructureEntity,
+    )
 
 
 @dataclass
@@ -651,25 +654,48 @@ class AllowNeverInCollision(AllowCollisionRule):
 @dataclass
 class AllowCollisionForAdjacentPairs(AllowCollisionRule):
     """
-    Allow collision between body pairs of the whole world model that are connected by a chain that has no controllable connection.
-    Adjacent bodies in the kinematic chain that are not separated by a controlled joint are allowed to collide.
+    Allow collision between body pairs of the whole world model that are connected by a
+    chain that has no controlled connection, and between each body and its direct parent.
     """
 
     def _update(self, world: World):
-        for body_a, body_b in combinations(world.bodies_with_collision, 2):
-            if self._no_controlled_connection_between_bodies(world, body_a, body_b):
+        bodies_with_collision = world.bodies_with_collision
+        bodies_by_subtree_root: dict[KinematicStructureEntity, list[Body]] = (
+            defaultdict(list)
+        )
+        for body in bodies_with_collision:
+            bodies_by_subtree_root[self._root_of_uncontrolled_subtree(body)].append(
+                body
+            )
+        for bodies in bodies_by_subtree_root.values():
+            self.allowed_collision_pairs.update(
+                CollisionCheck.create_for_bodies_with_collision(body_a, body_b)
+                for body_a, body_b in combinations(bodies, 2)
+            )
+
+        collision_bodies = set(bodies_with_collision)
+        for body in bodies_with_collision:
+            parent = body.parent_kinematic_structure_entity
+            if parent in collision_bodies:
                 self.allowed_collision_pairs.add(
-                    CollisionCheck.create_for_bodies_with_collision(body_a, body_b)
+                    CollisionCheck.create_for_bodies_with_collision(parent, body)
                 )
 
-    def _no_controlled_connection_between_bodies(
-        self, world: World, body_a: Body, body_b: Body
-    ) -> bool:
-        return (
-            not world.is_controlled_connection_in_chain(body_a, body_b)
-            or body_a == body_b.parent_kinematic_structure_entity
-            or body_b == body_a.parent_kinematic_structure_entity
-        )
+    @staticmethod
+    def _root_of_uncontrolled_subtree(
+        entity: KinematicStructureEntity,
+    ) -> KinematicStructureEntity:
+        """
+        :param entity: An entity of the world.
+        :return: The topmost entity the given one is connected to by a chain without
+            controlled connection; two entities share it exactly if no controlled
+            connection lies between them.
+        """
+        connection = entity.parent_connection
+        while connection is not None and not connection.is_controlled:
+            entity = connection.parent
+            connection = entity.parent_connection
+        return entity
 
 
 @dataclass
