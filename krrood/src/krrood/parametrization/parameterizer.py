@@ -943,7 +943,8 @@ class UnderspecifiedParameters(ModelQueryParameters):
         :param attribute_match: An attribute match of the statement.
         :return: Whether the attribute is assigned a variable ranging over a domain of
             objects, whose values a model samples as keys of that domain. A variable
-            over primitive values, such as one made by ``variable_from`` from enum
+            over primitive values, such as one made by
+            :func:`~krrood.entity_query_language.factories.variable_from` from enum
             members, is sampled as its values instead.
         """
         return (
@@ -1077,15 +1078,14 @@ class UnderspecifiedParameters(ModelQueryParameters):
         return result
 
     @classmethod
-    def _assigned_variable_type(
-        cls, attribute_match: AttributeMatch
-    ) -> type | None:
+    def _assigned_variable_type(cls, attribute_match: AttributeMatch) -> type | None:
         """
         :param attribute_match: An attribute match with a KRROOD variable assigned
             value.
         :return: The type of the values the assigned variable takes. A variable
-            without a type of its own, such as one made by ``variable_from``, takes the
-            type of the attribute it is assigned to.
+            without a type of its own, such as one made by
+            :func:`~krrood.entity_query_language.factories.variable_from`, takes the type
+            of the attribute it is assigned to.
         """
         return cls._process_attribute_match_type(
             attribute_match.assigned_variable._type_ or attribute_match._type_

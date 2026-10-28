@@ -214,7 +214,7 @@ def test_enum_value_as_literal():
         assert value.enum == TestEnum.OPTION_A
 
 
-def test_enum_candidates_from_a_variable_are_the_only_possible_values():
+def test_enum_candidates_from_a_variable_are_the_only_possible_values() -> None:
     """
     Enum members given as the domain of a variable restrict the enum attribute to
     exactly those members, with no probability left for the other members of the enum.
@@ -238,7 +238,7 @@ def test_enum_candidates_from_a_variable_are_the_only_possible_values():
     }
 
 
-def test_enum_candidates_from_a_variable_are_the_only_sampled_values():
+def test_enum_candidates_from_a_variable_are_the_only_sampled_values() -> None:
     """
     Sampling an enum attribute whose candidates are given as the domain of a variable
     yields only those members.
@@ -252,7 +252,7 @@ def test_enum_candidates_from_a_variable_are_the_only_sampled_values():
     assert {value.enum for value in values} <= set(candidates)
 
 
-def test_float_candidates_from_a_variable_are_the_only_sampled_values():
+def test_float_candidates_from_a_variable_are_the_only_sampled_values() -> None:
     """
     Floats given as the domain of a variable restrict the float attribute to exactly
     those values.
