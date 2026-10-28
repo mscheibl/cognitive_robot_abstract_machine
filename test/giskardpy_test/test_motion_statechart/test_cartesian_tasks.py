@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from giskardpy.executor import Executor
 from giskardpy.motion_statechart.binding_policy import GoalBindingPolicy
@@ -1693,6 +1694,54 @@ class TestVelocityTasks:
         assert (
             tight_cycles >= 2 * loose_cycles
         ), f"tight ({tight_cycles}) should take >= loose ({2 * loose_cycles}) control cycles"
+
+    def test_a_tip_that_starts_turned_turns_no_faster_than_the_limit(
+        self, pr2_world_state_reset: World
+    ):
+        """
+        A gripper whose rotation relative to the root does not start at the identity
+        turns about none of its axes faster than the rotational velocity limit.
+        """
+        world = pr2_world_state_reset
+        world.get_connection_by_name(PR2Joint.RIGHT_WRIST_ROLL).position = np.pi / 2
+        root = world.get_kinematic_structure_entity_by_name("base_link")
+        tip = world.get_kinematic_structure_entity_by_name("r_gripper_tool_frame")
+        tilt = CartesianOrientation(
+            root_link=root,
+            tip_link=tip,
+            goal_orientation=RotationMatrix.from_axis_angle(
+                AxisAngle(Vector3.Y(), np.pi / 3, reference_frame=tip)
+            ),
+        )
+        limit = CartesianRotationVelocityLimit(
+            root_link=root, tip_link=tip, max_angular_velocity=0.2
+        )
+        executor = Executor(MotionStatechartContext(world=world))
+        executor.compile(
+            motion_statechart=self._build_msc(goal_node=tilt, limit_node=limit)
+        )
+        control_time_step = executor.qp_controller.config.control_time_step
+
+        speeds_about_tip_axes = []
+        previous = world.compute_forward_kinematics_np(root, tip)[:3, :3]
+        while not executor.motion_statechart.is_end_motion():
+            executor.tick()
+            current = world.compute_forward_kinematics_np(root, tip)[:3, :3]
+            turn = Rotation.from_matrix(previous.T @ current).as_rotvec()
+            speeds_about_tip_axes.extend(
+                np.abs(turn) / control_time_step.total_seconds()
+            )
+            previous = current
+
+        # The limit holds for the linearised step; the turn over a whole control cycle
+        # differs from it by a second order term.
+        discretisation_error = (
+            limit.max_angular_velocity**2 * control_time_step.total_seconds()
+        )
+        assert (
+            max(speeds_about_tip_axes)
+            <= limit.max_angular_velocity + discretisation_error
+        )
 
 
 class TestDebugExpressions:
