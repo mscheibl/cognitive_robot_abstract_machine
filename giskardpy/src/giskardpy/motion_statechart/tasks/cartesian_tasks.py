@@ -20,8 +20,8 @@ from giskardpy.motion_statechart.data_types import (
 from giskardpy.motion_statechart.exceptions import GoalPointsReferenceFrameMismatchError
 from giskardpy.motion_statechart.goals.templates import Parallel
 from giskardpy.motion_statechart.error_signals import (
+    angular_velocity_from_joint_motion,
     joint_position_and_velocity_variables,
-    time_derivative_from_joint_motion,
 )
 from giskardpy.motion_statechart.graph_node import (
     NodeArtifacts,
@@ -898,17 +898,39 @@ class CartesianRotationVelocityLimit(Task):
     root_link: KinematicStructureEntity = field(kw_only=True)
     """Root link of the kinematic chain. Defines the reference frame from which the tip's motion is measured."""
     tip_link: KinematicStructureEntity = field(kw_only=True)
-    """Tip link of the kinematic chain. The translational velocity of this link (expressed in the root link frame) is constrained."""
+    """Tip link of the kinematic chain. The angular velocity of this link relative to the root link is constrained."""
     max_angular_velocity: float = field(default=0.4, kw_only=True)
-    """Maximum allowed angular speed. Interpreted in radians per second (rad/s).
-    The enforcement ensures the magnitude of the instantaneous
-    rotation rate does not exceed this threshold."""
+    """Maximum allowed angular speed about each axis of the tip link, in radians per
+    second (rad/s). A rotation about a diagonal of the tip link may reach up to
+    sqrt(3) times this speed."""
     weight: float = field(
         default=DefaultWeights.WEIGHT_ABOVE_COLLISION_AVOIDANCE, kw_only=True
     )
     """Optimization weight determining how strongly the rotational velocity
     limit is enforced. Higher weights give this constraint soft priority
     over lower weighted constraints when conflicts occur."""
+
+    _pose_at_cycle_start: ForwardKinematicsBinding = field(init=False, repr=False)
+    """The tip's pose relative to the root, bound at the start of every control cycle."""
+
+    def build(self, context: MotionStatechartContext) -> NodeArtifacts:
+        self._pose_at_cycle_start = ForwardKinematicsBinding(
+            name=PrefixedName("pose_at_cycle_start", str(self.name)),
+            root=self.root_link,
+            tip=self.tip_link,
+            float_variable_data=context.float_variable_data,
+        )
+        self._pose_at_cycle_start.bind(context.world)
+        return super().build(context)
+
+    def on_start(self, context: MotionStatechartContext):
+        self._pose_at_cycle_start.bind(context.world)
+
+    def on_unpause(self, context: MotionStatechartContext):
+        self._pose_at_cycle_start.bind(context.world)
+
+    def on_tick(self, context: MotionStatechartContext) -> None:
+        self._pose_at_cycle_start.bind(context.world)
 
     def build_artifacts(self, context: MotionStatechartContext) -> NodeArtifacts:
         artifacts = NodeArtifacts()
@@ -919,14 +941,22 @@ class CartesianRotationVelocityLimit(Task):
 
         artifacts.geometry.add_rotational_velocity_limit(
             frame_R_current=root_R_tip,
+            frame_R_at_cycle_start=self._pose_at_cycle_start.root_T_tip.rotation_matrix,
             max_velocity=self.max_angular_velocity,
             quadratic_weight=self.weight,
         )
 
-        angle = root_R_tip.axis_angle.angle
-        angle_dot = time_derivative_from_joint_motion(angle)
-
-        artifacts.observation = sm.abs(angle_dot) <= self.max_angular_velocity
+        angular_velocity = angular_velocity_from_joint_motion(root_R_tip)
+        artifacts.observation = sm.logic_and(
+            *(
+                sm.abs(speed_about_axis) <= self.max_angular_velocity
+                for speed_about_axis in (
+                    angular_velocity.x,
+                    angular_velocity.y,
+                    angular_velocity.z,
+                )
+            )
+        )
 
         return artifacts
 

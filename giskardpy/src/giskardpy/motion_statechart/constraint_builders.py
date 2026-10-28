@@ -201,28 +201,44 @@ class GeometricConstraintBuilder:
     def add_rotational_velocity_limit(
         self,
         frame_R_current: RotationMatrix,
+        frame_R_at_cycle_start: RotationMatrix,
         max_velocity: sm.ScalarData,
         quadratic_weight: sm.ScalarData,
         max_violation: sm.ScalarData = LargeNumber,
         name: Optional[str] = None,
     ) -> None:
         """
-        Add velocity constraints to limit the velocity of frame_R_current.
+        Add three velocity constraints that limit the angular velocity of
+        frame_R_current about each of its own axes.
 
         Be aware that the velocity is relative to frame.
+
+        .. note::
+            The limit holds per axis, so a rotation about a diagonal of the rotating
+            frame may reach up to sqrt(3) times max_velocity.
+
         :param frame_R_current: Rotation matrix describing the current rotation. It
             should depend on active dofs.
+        :param frame_R_at_cycle_start: frame_R_current at the start of the control
+            cycle, as a constant that does not depend on active dofs.
         :param max_velocity: rad/s
         """
-        root_Q_tipCurrent = frame_R_current.quaternion
-        angle_error = root_Q_tipCurrent.axis_angle.angle
-        self.collection.add_velocity_constraint(
-            upper_velocity_limit=max_velocity,
-            lower_velocity_limit=-max_velocity,
-            quadratic_weight=quadratic_weight,
-            task_expression=angle_error,
-            lower_slack_limit=-max_violation,
-            upper_slack_limit=max_violation,
-            name=name,
-            velocity_limit=max_velocity,
+        tip_R_tip_current = frame_R_at_cycle_start.T.dot(frame_R_current)
+        # Near the identity, the antisymmetric part of a rotation matrix is the skew
+        # matrix of its rotation vector.
+        rotation_vector = (
+            (tip_R_tip_current[2, 1] - tip_R_tip_current[1, 2]) / 2,
+            (tip_R_tip_current[0, 2] - tip_R_tip_current[2, 0]) / 2,
+            (tip_R_tip_current[1, 0] - tip_R_tip_current[0, 1]) / 2,
         )
+        for index, rotation_about_axis in enumerate(rotation_vector):
+            self.collection.add_velocity_constraint(
+                upper_velocity_limit=max_velocity,
+                lower_velocity_limit=-max_velocity,
+                quadratic_weight=quadratic_weight,
+                task_expression=rotation_about_axis,
+                lower_slack_limit=-max_violation,
+                upper_slack_limit=max_violation,
+                name=self._indexed_constraint_name(name, index),
+                velocity_limit=max_velocity,
+            )
