@@ -1653,7 +1653,7 @@ class TestVelocityTasks:
 
     def test_a_tip_moving_sideways_moves_no_faster_than_the_limit(
         self, pr2_world_state_reset: World
-    ):
+    ) -> None:
         """
         A gripper moving across rather than away from the root moves no faster than the
         translational velocity limit.
@@ -1688,6 +1688,44 @@ class TestVelocityTasks:
                 break
 
         assert max(speeds_along_root_axes) <= limit.max_linear_velocity + 1e-3
+
+    def test_a_tip_moving_sideways_faster_than_a_weak_limit_is_observed_as_violating_it(
+        self, pr2_world_state_reset: World
+    ) -> None:
+        """
+        A gripper moving across rather than away from the root faster than a
+        translational velocity limit weighted below its goal is observed as violating
+        the limit.
+        """
+        world = pr2_world_state_reset
+        root = world.get_kinematic_structure_entity_by_name("base_link")
+        tip = world.get_kinematic_structure_entity_by_name("r_gripper_tool_frame")
+        sideways = CartesianPosition(
+            root_link=root,
+            tip_link=tip,
+            goal_point=Point3(0, 0.2, 0, reference_frame=tip),
+            weight=DefaultWeights.WEIGHT_ABOVE_COLLISION_AVOIDANCE,
+        )
+        weak_limit = CartesianPositionVelocityLimit(
+            root_link=root,
+            tip_link=tip,
+            max_linear_velocity=0.05,
+            weight=DefaultWeights.WEIGHT_BELOW_COLLISION_AVOIDANCE,
+        )
+        executor = Executor(MotionStatechartContext(world=world))
+        executor.compile(
+            motion_statechart=self._build_msc(goal_node=sideways, limit_node=weak_limit)
+        )
+        for _ in range(400):
+            executor.tick()
+            if executor.motion_statechart.is_end_motion():
+                break
+
+        assert ObservationStateValues.FALSE in (
+            executor.motion_statechart.history.get_observation_history_of_node(
+                weak_limit
+            )
+        )
 
     @pytest.mark.parametrize(
         "limit_cls",
