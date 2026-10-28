@@ -1652,6 +1652,44 @@ class TestVelocityTasks:
             tight_cycles >= 2 * loose_cycles
         ), f"tight ({tight_cycles}) should take >= loose ({2 * loose_cycles}) control cycles"
 
+    def test_a_tip_moving_sideways_moves_no_faster_than_the_limit(
+        self, pr2_world_state_reset: World
+    ):
+        """
+        A gripper moving across rather than away from the root moves no faster than the
+        translational velocity limit.
+        """
+        world = pr2_world_state_reset
+        root = world.get_kinematic_structure_entity_by_name("base_link")
+        tip = world.get_kinematic_structure_entity_by_name("r_gripper_tool_frame")
+        sideways = CartesianPosition(
+            root_link=root,
+            tip_link=tip,
+            goal_point=Point3(0, 0.2, 0, reference_frame=tip),
+        )
+        limit = CartesianPositionVelocityLimit(
+            root_link=root, tip_link=tip, max_linear_velocity=0.05
+        )
+        executor = Executor(MotionStatechartContext(world=world))
+        executor.compile(
+            motion_statechart=self._build_msc(goal_node=sideways, limit_node=limit)
+        )
+        control_time_step = executor.qp_controller.config.control_time_step
+
+        speeds_along_root_axes = []
+        previous = world.compute_forward_kinematics_np(root, tip)[:3, 3]
+        for _ in range(400):
+            executor.tick()
+            current = world.compute_forward_kinematics_np(root, tip)[:3, 3]
+            speeds_along_root_axes.extend(
+                np.abs(current - previous) / control_time_step.total_seconds()
+            )
+            previous = current
+            if executor.motion_statechart.is_end_motion():
+                break
+
+        assert max(speeds_along_root_axes) <= limit.max_linear_velocity + 1e-3
+
     @pytest.mark.parametrize(
         "limit_cls",
         [CartesianVelocityLimit, CartesianRotationVelocityLimit],
