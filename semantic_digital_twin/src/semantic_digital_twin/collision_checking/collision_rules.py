@@ -651,7 +651,7 @@ class AllowCollisionForAdjacentPairs(AllowCollisionRule):
     chain that has no controlled connection, and between each body and its direct parent.
     """
 
-    def _update(self, world: World):
+    def _update(self, world: World) -> None:
         bodies_with_collision = world.bodies_with_collision
         bodies_by_subtree_root: dict[KinematicStructureEntity, list[Body]] = (
             defaultdict(list)

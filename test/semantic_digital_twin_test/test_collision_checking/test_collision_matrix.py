@@ -529,7 +529,11 @@ class TestCollisionRules:
 
     def test_adjacent_pairs_are_those_without_controlled_connection_between_them(
         self, pr2_apartment_world
-    ):
+    ) -> None:
+        """
+        The rule allows exactly the pairs with no controlled connection between them,
+        and each body with its direct parent.
+        """
         world = pr2_apartment_world
         rule = AllowCollisionForAdjacentPairs()
         rule.update(world)
