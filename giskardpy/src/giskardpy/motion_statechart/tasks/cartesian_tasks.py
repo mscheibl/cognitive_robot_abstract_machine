@@ -816,10 +816,10 @@ class CartesianPositionVelocityLimit(Task):
     """
     Limit the Cartesian (translational) velocity of a tip link relative to a root link.
 
-    This goal enforces a strict cap on the linear speed of the frame defined by
-    the kinematic transform from `root_link` to `tip_link`. Enforcement is performed
-    by adding constraints to the optimizer and by providing an observation expression
-    that evaluates whether the current translational speed is within the limit.
+    This goal caps the velocity of :attr:`tip_link` along each axis of
+    :attr:`root_link`. Enforcement is performed by adding constraints to the optimizer
+    and by providing an observation expression that evaluates whether the current
+    velocity along every axis is within the limit.
 
     .. warning::
        Strict Cartesian velocity limits require as many constraints as the prediction
@@ -981,9 +981,9 @@ class CartesianVelocityLimit(Parallel):
     tip_link: KinematicStructureEntity = field(kw_only=True)
     """Tip link of the kinematic chain. Both translational and rotational velocities of this link (expressed in the root link frame) are constrained."""
     max_linear_velocity: float = field(default=0.1, kw_only=True)
-    """Maximum allowed linear speed of the tip in meters per second (m/s).
-    Default: 0.1 m/s. The enforcement ensures the Euclidean norm of the
-    tip-frame translational velocity does not exceed this value."""
+    """Maximum allowed linear speed of the tip along each axis of the root link, in
+    meters per second (m/s). A motion along a diagonal of the root link may reach up to
+    sqrt(3) times this speed."""
     max_angular_velocity: float = field(default=0.4, kw_only=True)
     """Maximum allowed angular speed about each axis of the tip link, in radians per
     second (rad/s). A rotation about a diagonal of the tip link may reach up to
