@@ -674,8 +674,10 @@ class TryAllExecutable(ParallelExecutable):
 
     def raise_failure(self, errors: list[BaseException | None]) -> None:
         """
-        Raise an error that is not a :class:`~coraplex.plans.failures.PlanFailure`, or
-        :class:`~coraplex.plans.failures.AllChildrenFailed` if every executable failed.
+        Unlike :meth:`ParallelExecutable.raise_failure`, raise a
+        :class:`~coraplex.plans.failures.PlanFailure` of a child only as
+        :class:`~coraplex.plans.failures.AllChildrenFailed`, once every child failed;
+        any other error is raised as it is.
         """
         unexpected_error = next(
             (

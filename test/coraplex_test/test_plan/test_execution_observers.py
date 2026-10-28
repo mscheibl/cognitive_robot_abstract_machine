@@ -858,9 +858,7 @@ def test_try_in_order_tries_the_next_child_after_a_failed_native_verdict(
 
 
 # %% node-owned execution scopes
-def test_direct_attachment_reports_one_pair_of_boundaries(
-    pr2_apartment_context,
-) -> None:
+def test_direct_attachment_reports_one_pair_of_boundaries(pr2_apartment_context) -> None:
     world, robot, context = pr2_apartment_context
     attachment = ReAttachNode(
         body=world.get_body_by_name("milk.stl"), new_parent=robot.root

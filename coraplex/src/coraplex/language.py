@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing_extensions import Any, Callable
+from typing_extensions import Any, Callable, Generic, TypeVar
 
 from giskardpy.motion_statechart.goals.templates import (
     CancelledWhenTrue,
@@ -40,8 +40,11 @@ from coraplex.plans.failures import (
 )
 from coraplex.plans.motion_state_chart_building import BuildsMotionStateChart
 from coraplex.plans.plan_node import ExecutionBoundaryNode, PlanNode
+from krrood.patterns.subclass_safe_generic import SubClassSafeGeneric
 
 logger = logging.getLogger(__name__)
+
+ChildrenExecutableType = TypeVar("ChildrenExecutableType", bound=Executable)
 
 
 @dataclass(eq=False)
@@ -107,6 +110,28 @@ class ExecutesInParallel(LanguageNode, ABC):
     """
 
 
+@dataclass(eq=False)
+class RunsChildrenSeparately(
+    LanguageNode, Generic[ChildrenExecutableType], SubClassSafeGeneric, ABC
+):
+    """
+    A language node that, once a child cannot run inside a motion state chart, runs its
+    children through an executable of the bound type, one parsed executable per child.
+    """
+
+    def parse(self) -> Executable:
+        if not self.contains_execution_boundary:
+            return super().parse()
+        executable_type = type(self).get_type_of_generic_parameter(
+            ChildrenExecutableType
+        )
+        return executable_type(
+            execution_list=[child.parse() for child in self.children],
+            node=self,
+            context=self.context,
+        )
+
+
 @dataclass
 class SequentialNode(ExecutesSequentially):
     """
@@ -121,7 +146,7 @@ class SequentialNode(ExecutesSequentially):
 
 
 @dataclass
-class ParallelNode(ExecutesInParallel):
+class ParallelNode(RunsChildrenSeparately[ParallelExecutable], ExecutesInParallel):
     """
     Executes all children in parallel, each in its own thread.
 
@@ -131,15 +156,6 @@ class ParallelNode(ExecutesInParallel):
     motion_state_chart_template: type[NodeListGoal] = field(
         kw_only=True, default=Parallel
     )
-
-    def parse(self) -> Executable:
-        if not self.contains_execution_boundary:
-            return super().parse()
-        return ParallelExecutable(
-            execution_list=[child.parse() for child in self.children],
-            node=self,
-            context=self.context,
-        )
 
 
 @dataclass(eq=False)
@@ -225,7 +241,9 @@ class RepeatNode(ExecutesSequentially):
 
 
 @dataclass(eq=False)
-class TryInOrderNode(ExecutesSequentially):
+class TryInOrderNode(
+    RunsChildrenSeparately[TryInOrderExecutable], ExecutesSequentially
+):
     """
     Tries the children in order until one succeeds and fails if all children fail.
     """
@@ -234,18 +252,9 @@ class TryInOrderNode(ExecutesSequentially):
         kw_only=True, default=TryInOrder
     )
 
-    def parse(self) -> Executable:
-        if not self.contains_execution_boundary:
-            return super().parse()
-        return TryInOrderExecutable(
-            execution_list=[child.parse() for child in self.children],
-            node=self,
-            context=self.context,
-        )
-
 
 @dataclass(eq=False)
-class TryAllNode(ExecutesInParallel):
+class TryAllNode(RunsChildrenSeparately[TryAllExecutable], ExecutesInParallel):
     """
     Executes all children in parallel.
 
@@ -255,15 +264,6 @@ class TryAllNode(ExecutesInParallel):
     motion_state_chart_template: type[NodeListGoal] = field(
         kw_only=True, default=TryAll
     )
-
-    def parse(self) -> Executable:
-        if not self.contains_execution_boundary:
-            return super().parse()
-        return TryAllExecutable(
-            execution_list=[child.parse() for child in self.children],
-            node=self,
-            context=self.context,
-        )
 
 
 @dataclass(eq=False)

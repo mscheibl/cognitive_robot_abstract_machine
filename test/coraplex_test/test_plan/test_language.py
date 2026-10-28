@@ -266,7 +266,13 @@ def test_exception_try_in_order(pr2_apartment_context):
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
-def test_try_in_order_stops_at_the_first_child_that_succeeds(pr2_apartment_context):
+def test_try_in_order_stops_at_the_first_child_that_succeeds(
+    pr2_apartment_context,
+) -> None:
+    """
+    Once a child succeeds, :func:`~coraplex.plans.factories.try_in_order` runs none of
+    the children after it.
+    """
     world, robot_view, context = pr2_apartment_context
     dof = world.degrees_of_freedom[0]
     first_probe_key, second_probe_key = register_probe(), register_probe()
@@ -286,7 +292,13 @@ def test_try_in_order_stops_at_the_first_child_that_succeeds(pr2_apartment_conte
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
-def test_try_in_order_tries_the_next_child_after_a_failure(pr2_apartment_context):
+def test_try_in_order_tries_the_next_child_after_a_failure(
+    pr2_apartment_context,
+) -> None:
+    """
+    After a child failed, :func:`~coraplex.plans.factories.try_in_order` runs the next
+    one.
+    """
     world, robot_view, context = pr2_apartment_context
     dof = world.degrees_of_freedom[0]
     first_probe_key, second_probe_key = register_probe(), register_probe()
@@ -308,7 +320,11 @@ def test_try_in_order_tries_the_next_child_after_a_failure(pr2_apartment_context
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
-def test_try_in_order_fails_once_every_child_failed(pr2_apartment_context):
+def test_try_in_order_fails_once_every_child_failed(pr2_apartment_context) -> None:
+    """
+    :func:`~coraplex.plans.factories.try_in_order` fails once every child failed, after
+    running each once.
+    """
     world, robot_view, context = pr2_apartment_context
     dof = world.degrees_of_freedom[0]
     first_probe_key, second_probe_key = register_probe(), register_probe()
@@ -331,7 +347,11 @@ def test_try_in_order_fails_once_every_child_failed(pr2_apartment_context):
     assert len(_registered_probes[second_probe_key].calls) == 1
 
 
-def test_try_in_order_runs_after_the_steps_before_it(pr2_apartment_context):
+def test_try_in_order_runs_after_the_steps_before_it(pr2_apartment_context) -> None:
+    """
+    :func:`~coraplex.plans.factories.try_in_order` runs its children only after the
+    steps before it ran.
+    """
     world, robot_view, context = pr2_apartment_context
     dof = world.degrees_of_freedom[0]
     step_probe_key, alternative_probe_key = register_probe(), register_probe()
@@ -354,7 +374,10 @@ def test_try_in_order_runs_after_the_steps_before_it(pr2_apartment_context):
     assert alternative_call.position_at_entry == position_written_by_step
 
 
-def test_code_runs_when_the_plan_reaches_it(pr2_apartment_context):
+def test_code_runs_when_the_plan_reaches_it(pr2_apartment_context) -> None:
+    """
+    A code node runs when the plan reaches it, after the steps before it.
+    """
     world, robot_view, context = pr2_apartment_context
     dof = world.degrees_of_freedom[0]
     probe_key = register_probe()
@@ -391,7 +414,10 @@ def test_exception_try_all(pr2_apartment_context):
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
-def test_parallel_runs_each_child_once(pr2_apartment_context):
+def test_parallel_runs_each_child_once(pr2_apartment_context) -> None:
+    """
+    :func:`~coraplex.plans.factories.parallel` runs each of its children exactly once.
+    """
     world, robot_view, context = pr2_apartment_context
     first_dof, second_dof = world.degrees_of_freedom[:2]
     first_probe_key, second_probe_key = register_probe(), register_probe()
@@ -411,7 +437,11 @@ def test_parallel_runs_each_child_once(pr2_apartment_context):
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
-def test_parallel_runs_after_the_steps_before_it(pr2_apartment_context):
+def test_parallel_runs_after_the_steps_before_it(pr2_apartment_context) -> None:
+    """
+    :func:`~coraplex.plans.factories.parallel` runs its children only after the steps
+    before it ran.
+    """
     world, robot_view, context = pr2_apartment_context
     dof = world.degrees_of_freedom[0]
     step_probe_key, concurrent_probe_key = register_probe(), register_probe()
@@ -432,7 +462,11 @@ def test_parallel_runs_after_the_steps_before_it(pr2_apartment_context):
     assert concurrent_call.position_at_entry == position_written_by_step
 
 
-def test_try_all_runs_each_child_once(pr2_apartment_context):
+def test_try_all_runs_each_child_once(pr2_apartment_context) -> None:
+    """
+    :func:`~coraplex.plans.factories.try_all` runs each of its children exactly once,
+    even if one fails.
+    """
     world, robot_view, context = pr2_apartment_context
     first_dof, second_dof = world.degrees_of_freedom[:2]
     first_probe_key, second_probe_key = register_probe(), register_probe()
@@ -456,7 +490,41 @@ def test_try_all_runs_each_child_once(pr2_apartment_context):
     assert plan.root.status == LifeCycleValues.SUCCEEDED
 
 
-def test_try_all_fails_once_every_child_failed(pr2_apartment_context):
+def raise_an_error_that_is_no_plan_failure() -> None:
+    """
+    Fail the way a bug fails, with an error that is no plan failure.
+    """
+    raise ValueError("not a plan failure")
+
+
+def test_try_all_raises_an_error_that_is_no_plan_failure(
+    pr2_apartment_context,
+) -> None:
+    """
+    An error that is no plan failure is raised, even if another child succeeds, instead
+    of counting as a failed alternative.
+    """
+    world, robot_view, context = pr2_apartment_context
+    dof = world.degrees_of_freedom[0]
+    probe_key = register_probe()
+
+    plan = try_all(
+        [
+            RecordingAction(probe_key=probe_key, dof_id=dof.id),
+            code(raise_an_error_that_is_no_plan_failure),
+        ],
+        context,
+    ).plan
+    with kinematically_simulated_robot, pytest.raises(ValueError):
+        plan.perform()
+
+    assert len(_registered_probes[probe_key].calls) == 1
+
+
+def test_try_all_fails_once_every_child_failed(pr2_apartment_context) -> None:
+    """
+    :func:`~coraplex.plans.factories.try_all` fails once every child failed.
+    """
     world, robot_view, context = pr2_apartment_context
     first_dof, second_dof = world.degrees_of_freedom[:2]
     first_probe_key, second_probe_key = register_probe(), register_probe()
