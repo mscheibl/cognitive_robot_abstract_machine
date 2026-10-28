@@ -13,6 +13,7 @@ from krrood.parametrization.model_registries import FullyFactorizedRegistry
 from ..dataset.semantic_world_like_classes import Body
 from krrood.entity_query_language.factories import (
     variable,
+    variable_from,
     a,
     an,
 )
@@ -189,6 +190,29 @@ def test_variable_of_attribute_missing_from_the_pattern_raises():
 
 def test_model_sample_from_bindings_inverts_bindings_from_model_samples():
     query = an(EnumAction)(obj=Body(name="body"), enum=...)
+    parameters = UnderspecifiedParameters(query)
+    model = parameters.resolve_conditioned_and_truncated_model(
+        FullyFactorizedRegistry().get_model(parameters)
+    )
+    samples = model.sample(1)
+    [bindings] = parameters.bindings_from_model_samples(model.variables, samples)
+    assert (
+        parameters.model_sample_from_bindings(model.variables, bindings).tolist()
+        == samples.tolist()
+    )
+
+
+def test_model_sample_from_bindings_inverts_bindings_of_enum_candidates_from_a_variable() -> (
+    None
+):
+    """
+    Enum members given as the domain of a variable are written into a model sample as
+    the values the model samples for them, so translating the bindings back gives them.
+    """
+    query = an(EnumAction)(
+        obj=Body(name="body"),
+        enum=variable_from([TestEnum.OPTION_A, TestEnum.OPTION_B]),
+    )
     parameters = UnderspecifiedParameters(query)
     model = parameters.resolve_conditioned_and_truncated_model(
         FullyFactorizedRegistry().get_model(parameters)
