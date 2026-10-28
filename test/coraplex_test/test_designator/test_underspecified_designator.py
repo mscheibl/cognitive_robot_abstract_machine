@@ -402,7 +402,7 @@ def test_a_trial_catches_its_copy_up_with_what_the_world_gained(
 
 def test_nested_underspecified_node_spans_its_candidate_trials(
     apartment_world_pr2_copy_with_context,
-):
+) -> None:
     """
     An underspecified node below another node tracks its own execution, and its span
     covers the search for a candidate as well as the accepted candidate's real attempt.
@@ -429,7 +429,7 @@ def test_nested_underspecified_node_spans_its_candidate_trials(
 
 def test_nested_underspecified_node_without_surviving_candidate_fails(
     apartment_world_pr2_copy_with_context,
-):
+) -> None:
     """
     An underspecified node below another node whose every candidate fails its trial ends
     as failed, rather than looking as if it never started.
