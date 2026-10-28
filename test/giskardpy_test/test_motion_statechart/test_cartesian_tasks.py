@@ -1733,15 +1733,25 @@ class TestVelocityTasks:
             tight_cycles >= 2 * loose_cycles
         ), f"tight ({tight_cycles}) should take >= loose ({2 * loose_cycles}) control cycles"
 
+    @pytest.fixture
+    def world_with_turned_right_gripper(self, pr2_world_state_reset: World) -> World:
+        """
+        :return: The PR2 with its right gripper rolled by a quarter turn, so the
+            gripper's rotation relative to the base does not start at the identity.
+        """
+        pr2_world_state_reset.get_connection_by_name(
+            PR2Joint.RIGHT_WRIST_ROLL
+        ).position = np.pi / 2
+        return pr2_world_state_reset
+
     def test_a_tip_that_starts_turned_turns_no_faster_than_the_limit(
-        self, pr2_world_state_reset: World
-    ):
+        self, world_with_turned_right_gripper: World
+    ) -> None:
         """
         A gripper whose rotation relative to the root does not start at the identity
         turns about none of its axes faster than the rotational velocity limit.
         """
-        world = pr2_world_state_reset
-        world.get_connection_by_name(PR2Joint.RIGHT_WRIST_ROLL).position = np.pi / 2
+        world = world_with_turned_right_gripper
         root = world.get_kinematic_structure_entity_by_name("base_link")
         tip = world.get_kinematic_structure_entity_by_name("r_gripper_tool_frame")
         tilt = CartesianOrientation(
@@ -1762,7 +1772,7 @@ class TestVelocityTasks:
 
         speeds_about_tip_axes = []
         previous = world.compute_forward_kinematics_np(root, tip)[:3, :3]
-        while not executor.motion_statechart.is_end_motion():
+        for _ in range(400):
             executor.tick()
             current = world.compute_forward_kinematics_np(root, tip)[:3, :3]
             turn = Rotation.from_matrix(previous.T @ current).as_rotvec()
@@ -1770,6 +1780,8 @@ class TestVelocityTasks:
                 np.abs(turn) / control_time_step.total_seconds()
             )
             previous = current
+            if executor.motion_statechart.is_end_motion():
+                break
 
         # The limit holds for the linearised step; the turn over a whole control cycle
         # differs from it by a second order term.
@@ -1779,6 +1791,40 @@ class TestVelocityTasks:
         assert (
             max(speeds_about_tip_axes)
             <= limit.max_angular_velocity + discretisation_error
+        )
+
+    def test_a_turned_tip_turning_faster_than_a_weak_limit_is_observed_as_violating_it(
+        self, world_with_turned_right_gripper: World
+    ) -> None:
+        """
+        A gripper that starts turned and tilts faster than a rotational velocity limit
+        weighted below its goal is observed as violating the limit.
+        """
+        world = world_with_turned_right_gripper
+        root = world.get_kinematic_structure_entity_by_name("base_link")
+        tip = world.get_kinematic_structure_entity_by_name("r_gripper_tool_frame")
+        tilt = CartesianOrientation(
+            root_link=root,
+            tip_link=tip,
+            goal_orientation=RotationMatrix.from_axis_angle(
+                AxisAngle(Vector3.Y(), np.pi / 6, reference_frame=tip)
+            ),
+            weight=DefaultWeights.WEIGHT_ABOVE_COLLISION_AVOIDANCE,
+        )
+        weak_limit = CartesianRotationVelocityLimit(
+            root_link=root,
+            tip_link=tip,
+            max_angular_velocity=0.3,
+            weight=DefaultWeights.WEIGHT_BELOW_COLLISION_AVOIDANCE,
+        )
+        _, executor = self._compile_msc_and_run_until_end(
+            world=world, goal_node=tilt, limit_node=weak_limit
+        )
+
+        assert ObservationStateValues.FALSE in (
+            executor.motion_statechart.history.get_observation_history_of_node(
+                weak_limit
+            )
         )
 
 

@@ -922,10 +922,10 @@ class CartesianRotationVelocityLimit(Task):
         self._pose_at_cycle_start.bind(context.world)
         return super().build(context)
 
-    def on_start(self, context: MotionStatechartContext):
+    def on_start(self, context: MotionStatechartContext) -> None:
         self._pose_at_cycle_start.bind(context.world)
 
-    def on_unpause(self, context: MotionStatechartContext):
+    def on_unpause(self, context: MotionStatechartContext) -> None:
         self._pose_at_cycle_start.bind(context.world)
 
     def on_tick(self, context: MotionStatechartContext) -> None:
@@ -985,9 +985,9 @@ class CartesianVelocityLimit(Parallel):
     Default: 0.1 m/s. The enforcement ensures the Euclidean norm of the
     tip-frame translational velocity does not exceed this value."""
     max_angular_velocity: float = field(default=0.4, kw_only=True)
-    """Maximum allowed angular speed. Interpreted in radians per second (rad/s).
-    Default: 0.5 rad/s. The enforcement ensures the magnitude of the instantaneous
-    rotation rate does not exceed this threshold."""
+    """Maximum allowed angular speed about each axis of the tip link, in radians per
+    second (rad/s). A rotation about a diagonal of the tip link may reach up to
+    sqrt(3) times this speed."""
     weight: float = field(
         default=DefaultWeights.WEIGHT_ABOVE_COLLISION_AVOIDANCE, kw_only=True
     )
