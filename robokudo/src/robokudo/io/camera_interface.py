@@ -39,7 +39,7 @@ from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import CompressedImage, CameraInfo, Image
 from tf2_ros import Buffer
-from typing_extensions import Optional, List, Any, TYPE_CHECKING, Union, Tuple
+from typing_extensions import Any, TYPE_CHECKING
 
 from robokudo.cas import CASViews, CAS
 from robokudo.defs import PACKAGE_NAME
@@ -57,6 +57,8 @@ from semantic_digital_twin.spatial_types import HomogeneousTransformationMatrix
 
 if TYPE_CHECKING:
     import numpy.typing as npt
+
+    from robokudo.types.cv import ColorToDepthRatio
 
 
 class CameraInterface(object):
@@ -100,7 +102,7 @@ class CameraInterface(object):
         world_frame: str,
         camera_frame: str,
         world_T_camera: HomogeneousTransformationMatrix,
-        timestamp_ns: Optional[int] = None,
+        timestamp_ns: int | None = None,
     ) -> None:
         """Write a camera-to-world transform to the CAS and runtime world."""
         setup_world_for_camera_frame(world_frame=world_frame, camera_frame=camera_frame)
@@ -133,7 +135,7 @@ class CameraInterface(object):
         world_frame: str,
         camera_frame: str,
         world_T_camera: HomogeneousTransformationMatrix,
-        timestamp_ns: Optional[int] = None,
+        timestamp_ns: int | None = None,
     ) -> None:
         """Write a camera-to-world transform to the CAS and runtime world."""
         self.store_camera_to_world_transform_in_cas(
@@ -145,7 +147,7 @@ class CameraInterface(object):
         )
 
     def store_static_camera_transform_if_configured(
-        self, cas: CAS, timestamp_ns: Optional[int] = None
+        self, cas: CAS, timestamp_ns: int | None = None
     ) -> bool:
         """Write the configured static camera transform, if enabled."""
         if not self.camera_config.static_camera_transform_enabled:
@@ -180,7 +182,7 @@ class ROSCameraInterface(CameraInterface):
     transform lookups and camera intrinsics handling.
     """
 
-    def __init__(self, camera_config: Any, node: Optional[Node] = None) -> None:
+    def __init__(self, camera_config: Any, node: Node | None = None) -> None:
         """
         Initialize the ROS camera interface.
 
@@ -208,10 +210,10 @@ class ROSCameraInterface(CameraInterface):
             self.lookup_viewpoint: bool = False
             """Whether to look up camera transforms"""
 
-        self.camera_translation: List[float] = [0.0, 0.0, 0.0]
+        self.camera_translation: list[float] = [0.0, 0.0, 0.0]
         """Camera translation from TF"""
 
-        self.camera_quaternion: List[float] = [0.0, 0.0, 0.0, 1.0]
+        self.camera_quaternion: list[float] = [0.0, 0.0, 0.0, 1.0]
         """Camera rotation from TF"""
 
         if self.lookup_viewpoint:
@@ -436,15 +438,15 @@ class KinectCameraInterface(ROSCameraInterface):
             CompressedImage if self.compressed_depth_configured() else Image,
             camera_config.topic_depth,
         )
-        """Depth image subscriber"""
-
+        """
+        Depth image subscriber.
+        """
         self.camera_info_subscriber: message_filters.Subscriber = Subscriber(
             self.node, CameraInfo, camera_config.topic_camera_info
         )
-        """Camera info subscriber"""
-        # self.camera_info_sub = self.node.create_subscription(CameraInfo, camera_config.topic_camera_info,
-        #                                                   self.blackhole_callback, 10)
-
+        """
+        Camera info subscriber.
+        """
         ts = ApproximateTimeSynchronizer(
             [self.color_subscriber, self.depth_subscriber, self.camera_info_subscriber],
             queue_size=10,
@@ -457,40 +459,42 @@ class KinectCameraInterface(ROSCameraInterface):
         self.rk_logger.info(f"  {camera_config.topic_depth}")
         self.rk_logger.info(f"  {camera_config.topic_camera_info}")
 
-        self.color: Optional[npt.NDArray] = None
+        self.color: npt.NDArray | None = None
         """
         Latest color image.
         """
-        self.depth: Optional[npt.NDArray] = None
+        self.depth: npt.NDArray | None = None
         """
-        Latest depth image
+        Latest depth image.
         """
 
-        self.camera_info: Optional[CameraInfo] = None
+        self.camera_info: CameraInfo | None = None
         """
         Latest camera info message
         """
 
-        self.camera_intrinsic: Optional[o3d.camera.PinholeCameraIntrinsic] = None
+        self.camera_intrinsic: o3d.camera.PinholeCameraIntrinsic | None = None
         """
-        Open3D camera intrinsics
-        """
-
-        self.color2depth_ratio: Optional[Tuple[float, float]] = None
-        """
-        Ratio between color and depth image sizes
+        Latest camera info message.
         """
 
-        self.timestamp: Optional[builtin_interfaces.msg.Time] = None
+        self.color_to_depth_ratio: ColorToDepthRatio | None = None
         """
-        Latest message timestamp
+        Ratio between color and depth image sizes.
+        """
+        self.timestamp: builtin_interfaces.msg.Time | None = None
+        """
+        Latest message timestamp.
         """
 
         self.lock: Lock = Lock()
-        """Thread synchronization lock"""
-
+        """
+        Thread synchronization lock.
+        """
         self.bridge: CVBridgeWorkaround = CVBridgeWorkaround()
-        """NumPy-compatible replacement for cv_bridge."""
+        """
+        NumPy-compatible replacement for cv_bridge.
+        """
 
     def compressed_depth_configured(self) -> bool:
         """
@@ -528,9 +532,9 @@ class KinectCameraInterface(ROSCameraInterface):
 
     def callback(
         self,
-        color_data: Union[Image, CompressedImage],
-        depth_data: Optional[Union[Image, CompressedImage]] = None,
-        camera_info: Optional[CameraInfo] = None,
+        color_data: Image | CompressedImage,
+        depth_data: Image | CompressedImage | None = None,
+        camera_info: CameraInfo | None = None,
     ) -> None:
         """
         Process synchronized camera data.
@@ -628,13 +632,13 @@ class KinectCameraInterface(ROSCameraInterface):
         cy = self.camera_info.k[5]
         self.camera_intrinsic.set_intrinsics(width, height, fx, fy, cx, cy)
 
-        self.color2depth_ratio = self.camera_config.color2depth_ratio
+        self.color_to_depth_ratio = self.camera_config.color_to_depth_ratio
 
         cas.set(CASViews.COLOR_IMAGE, self.color)
         cas.set(CASViews.DEPTH_IMAGE, self.depth)
         cas.set(CASViews.CAMERA_INFO, self.camera_info)
         cas.set(CASViews.CAMERA_INTRINSIC, self.camera_intrinsic)
-        cas.set(CASViews.COLOR2DEPTH_RATIO, self.color2depth_ratio)
+        cas.set(CASViews.COLOR_TO_DEPTH_RATIO, self.color_to_depth_ratio)
 
         self.store_camera_to_world_transform_from_tf(cas, self.timestamp)
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from typing_extensions import Any, Dict, List, Tuple
+from typing_extensions import Any
 
 from coraplex.plans.attachment_nodes import ReAttachNode
 from coraplex.plans.plan_node import PlanNode
@@ -35,10 +35,8 @@ from semantic_digital_twin.reasoning.predicates import allclose
 from semantic_digital_twin.reasoning.robot_predicates import is_body_gripped
 from semantic_digital_twin.robots.robot_parts import Arm
 from semantic_digital_twin.spatial_types.spatial_types import Pose
-from semantic_digital_twin.grasping.grasp_candidates import (
-    GraspCandidate,
-    HasGraspCandidates,
-)
+from semantic_digital_twin.grasping.grasp_candidates import GraspCandidate
+from semantic_digital_twin.semantic_annotations.mixins import HasGraspCandidates
 
 
 @dataclass
@@ -116,7 +114,7 @@ class PlaceAction(
             self.context,
         )
 
-    def _holding_arm_and_grasp(self) -> Tuple[Arm, GraspCandidate]:
+    def _holding_arm_and_grasp(self) -> tuple[Arm, GraspCandidate]:
         """
         The arm that holds :attr:`object_designator`, and the grasp it holds it by.
 
@@ -150,7 +148,7 @@ class PlaceAction(
 
     @staticmethod
     def pre_condition(
-        variables: Dict[str, Variable], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Variable], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         An arm of the robot needs to hold the object, whether the object hangs off its
@@ -172,7 +170,7 @@ class PlaceAction(
 
     @staticmethod
     def post_condition(
-        variables: Dict[str, Variable], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Variable], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         No arm may hold the object any more and it needs to be at the target location.
@@ -193,8 +191,8 @@ class PlaceAction(
 
     @staticmethod
     def _grips_of_every_arm(
-        context: Context, kwargs: Dict[str, Any], threshold: float
-    ) -> List[ConditionType]:
+        context: Context, kwargs: dict[str, Any], threshold: float
+    ) -> list[ConditionType]:
         """
         :param threshold: The fraction of rays between the fingers that has to hit the
             object for it to count as gripped.

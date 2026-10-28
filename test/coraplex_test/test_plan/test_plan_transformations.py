@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pytest
-from typing_extensions import List
 
 from coraplex.datastructures.enums import InsertionPosition, ReachFraction
 from coraplex.exceptions import CannotMatchOnType, ReachHasNoFinalApproach
@@ -24,9 +23,18 @@ from coraplex.robot_plans.actions.core.navigation import (
     LookAtAction,
     NavigateAction,
 )
-from coraplex.robot_plans.actions.core.pick_up import PickUpAction, ReachAction
+from coraplex.execution_environment import (
+    PhysicallySimulatedRobot,
+    kinematically_simulated_robot,
+)
+from coraplex.robot_plans.actions.core.pick_up import (
+    GraspingAction,
+    PickUpAction,
+    ReachAction,
+)
 from coraplex.robot_plans.actions.core.robot_body import MoveTorsoAction, ParkArmsAction
 from coraplex.robot_plans.motions.gripper import (
+    MoveFingersToWidthMotion,
     MoveGripperMotion,
     MoveToolCenterPointMotion,
 )
@@ -38,6 +46,7 @@ from coraplex.robot_plans.actions.composite.transporting import (
 )
 from coraplex.robot_plans.actions.core.placing import PlaceAction
 from coraplex.robot_plans.plan_transformations import (
+    CloseFingersToObjectWidth,
     DetectBeforeGrasp,
     OpenDrawerBeforeMoveAndPickUp,
     OpenDrawerBeforePickUp,
@@ -58,8 +67,12 @@ from semantic_digital_twin.semantic_annotations.semantic_annotations import (
     Spoon,
 )
 from semantic_digital_twin.spatial_types.spatial_types import Pose
+from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
 from semantic_digital_twin.world import World
+from semantic_digital_twin.world_description.connections import FixedConnection
+from semantic_digital_twin.world_description.world_entity import Body
 
+from ..conftest import left_or_only_arm
 from .test_graph_parsing import detect_actions_of, reach_action
 from ..test_transporting import pick_and_place_of_the_milk
 
@@ -108,7 +121,7 @@ class MoveGrippersBeforeTorsoMotion(InsertionTransformation[MoveTorsoAction]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return motion_of(plan_node)
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [
             MoveGripperMotion(GripperState.OPEN, left_gripper(plan_node)),
             MoveGripperMotion(GripperState.CLOSE, right_gripper(plan_node)),
@@ -143,7 +156,7 @@ class ParkArmsBeforeTorsoMotion(InsertionTransformation[MoveTorsoAction]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return motion_of(plan_node)
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [ParkArmsAction(plan_node.plan.context.robot.all_arms)]
 
 
@@ -166,11 +179,11 @@ class MoveGripperLastInTheReachBody(InsertionTransformation[ReachAction]):
         ]
         return body
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.CLOSE, right_gripper(plan_node))]
 
 
-def motions_of(plan_node: PlanNode) -> List[MotionNode]:
+def motions_of(plan_node: PlanNode) -> list[MotionNode]:
     """
     :param plan_node: The node whose children to look at.
     :return: The motions directly below the given node, in their plan order.
@@ -217,7 +230,7 @@ class MoveGripperBeforeEveryAction(InsertionTransformation[ActionNode]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return plan_node
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.CLOSE, right_gripper(plan_node))]
 
 
@@ -230,7 +243,7 @@ class TransformationWithoutPosition(InsertionTransformation[MoveTorsoAction]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return plan_node
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.OPEN, left_gripper(plan_node))]
 
 
@@ -326,7 +339,7 @@ class MoveGripperBeforeHighTorso(InsertionTransformation[MoveTorsoAction]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return motion_of(plan_node)
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.OPEN, left_gripper(plan_node))]
 
 
@@ -437,7 +450,7 @@ class MoveGripperBeforeJointMotion(InsertionTransformation[MoveJointsMotion]):
     def anchor(self, plan_node: MotionNode) -> PlanNode:
         return plan_node
 
-    def nodes_to_insert(self, plan_node: MotionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: MotionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.CLOSE, right_gripper(plan_node))]
 
 
@@ -645,7 +658,7 @@ How far the drawer is pulled out after an opening of it has been built.
 """
 
 
-def motions_below(plan_node: PlanNode) -> List[type]:
+def motions_below(plan_node: PlanNode) -> list[type]:
     """
     :param plan_node: The node whose expansion to look at.
     :return: The type of every motion under the given node, in their plan order.
@@ -1148,7 +1161,7 @@ def test_a_transport_of_an_object_in_no_drawer_is_left_alone(pr2_apartment_conte
 # %% parking around a pick-and-place
 
 
-def step_types_of(plan_node: ActionNode) -> List[type]:
+def step_types_of(plan_node: ActionNode) -> list[type]:
     """
     :param plan_node: The node of an expanded composite action.
     :return: The type of each step the action runs, in the order they are run.
@@ -1210,7 +1223,7 @@ class MoveLeftGripperBeforeTorso(InsertionTransformation[MoveTorsoAction]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return plan_node
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.OPEN, left_gripper(plan_node))]
 
 
@@ -1220,11 +1233,11 @@ class MoveRightGripperBeforeTorso(MoveLeftGripperBeforeTorso):
     Puts a right gripper motion there instead.
     """
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         return [MoveGripperMotion(GripperState.CLOSE, right_gripper(plan_node))]
 
 
-def warnings_of(caplog) -> List[str]:
+def warnings_of(caplog) -> list[str]:
     """
     :param caplog: The capture of this test's log records.
     :return: The message of every warning the plan reported.
@@ -1295,3 +1308,117 @@ def test_a_transformation_the_case_does_not_need_is_no_collision(
 
     assert warnings_of(caplog) == []
     assert plan.plan.applicable_transformations(torso) == [MoveLeftGripperBeforeTorso()]
+
+
+# %% holding an object at its own width
+
+
+def width_motions_of(plan) -> list[MoveFingersToWidthMotion]:
+    """
+    :param plan: The plan to read.
+    :return: The motions of it that send the fingers to a width.
+    """
+    return [
+        node.motion
+        for node in plan.get_nodes_by_designator_type(MoveFingersToWidthMotion)
+    ]
+
+
+def shutting_motions_of(plan) -> list[MoveGripperMotion]:
+    """
+    :param plan: The plan to read.
+    :return: The motions of it that shut the gripper.
+    """
+    return [
+        node.motion
+        for node in plan.get_nodes_by_designator_type(MoveGripperMotion)
+        if node.motion.motion is GripperState.CLOSE
+    ]
+
+
+def grasp_of(milk: Milk) -> GraspCandidate:
+    """
+    :param milk: The object to grasp.
+    :return: A grasp at that object's own origin.
+    """
+    return GraspCandidate.from_body_origin(milk)
+
+
+def expanded_grasp(context, milk: Milk):
+    """
+    :param context: The context to ground the grasp in.
+    :param milk: The object to grasp.
+    :return: The plan of a grasp on it, expanded.
+    """
+    grasping = GraspingAction(grasp_of(milk), left_or_only_arm(context.robot))
+    sequential([grasping], context=context)
+    grasping.plan_node.notify()
+    return grasping.plan_node.plan
+
+
+def test_a_grasp_closes_to_the_objects_width_where_objects_push_back(
+    pr2_apartment_context,
+):
+    world, _, context = pr2_apartment_context
+    milk = world.get_semantic_annotations_by_type(Milk)[0]
+    context.plan_transformations.append(CloseFingersToObjectWidth())
+
+    with PhysicallySimulatedRobot(simulation=None):
+        plan = expanded_grasp(context, milk)
+
+    assert shutting_motions_of(plan) == []
+    assert [motion.width for motion in width_motions_of(plan)] == [
+        grasp_of(milk).width_along_closing_axis
+    ]
+
+
+def test_a_grasp_still_shuts_the_gripper_where_nothing_pushes_back(
+    pr2_apartment_context,
+):
+    """
+    The width means nothing where the world is moved kinematically, so the grasp is left
+    exactly as it was built.
+    """
+    world, _, context = pr2_apartment_context
+    milk = world.get_semantic_annotations_by_type(Milk)[0]
+    context.plan_transformations.append(CloseFingersToObjectWidth())
+
+    with kinematically_simulated_robot:
+        plan = expanded_grasp(context, milk)
+
+    assert width_motions_of(plan) == []
+    assert len(shutting_motions_of(plan)) == 1
+
+
+def test_the_squeeze_is_handed_on_to_the_fingers(pr2_apartment_context):
+    world, _, context = pr2_apartment_context
+    milk = world.get_semantic_annotations_by_type(Milk)[0]
+    squeeze = 0.002
+    context.plan_transformations.append(CloseFingersToObjectWidth(squeeze=squeeze))
+
+    with PhysicallySimulatedRobot(simulation=None):
+        plan = expanded_grasp(context, milk)
+
+    assert [motion.squeeze for motion in width_motions_of(plan)] == [squeeze]
+
+
+def test_an_object_without_collision_is_still_held_by_shutting_the_gripper(
+    pr2_apartment_context,
+):
+    """
+    There is no width to measure on a body without geometry, so the grasp keeps the
+    motion it was built with instead of being rewritten with a guess.
+    """
+    world, _, context = pr2_apartment_context
+    with world.modify_world():
+        body = Body(name=PrefixedName("shapeless_milk"))
+        world.add_connection(FixedConnection(parent=world.root, child=body))
+        shapeless = Milk(root=body)
+        world.add_semantic_annotation(shapeless)
+    context.plan_transformations.append(CloseFingersToObjectWidth())
+
+    with PhysicallySimulatedRobot(simulation=None):
+        plan = expanded_grasp(context, shapeless)
+
+    assert width_motions_of(plan) == []
+    assert len(shutting_motions_of(plan)) == 1

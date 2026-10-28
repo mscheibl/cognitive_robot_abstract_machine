@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing_extensions import Optional, List
 
 from giskardpy.motion_statechart.data_types import DefaultWeights
 from giskardpy.motion_statechart.goals.templates import Parallel, Sequence
@@ -21,12 +21,20 @@ from giskardpy.motion_statechart.monitors.monitors import LocalMinimumReached
 from semantic_digital_twin.datastructures.alignment import AlignmentPair
 from semantic_digital_twin.datastructures.definitions import GripperState
 from semantic_digital_twin.robots.justin import Justin
-from semantic_digital_twin.robots.robot_part_mixins import HasMobileBase
+from semantic_digital_twin.robots.robot_part_mixins import (
+    HasMobileBase,
+    HasTwoFingers,
+)
 from semantic_digital_twin.robots.robot_parts import Arm, EndEffector
 from semantic_digital_twin.spatial_types import Point3, Vector3
 from semantic_digital_twin.spatial_types.spatial_types import Pose
 from semantic_digital_twin.world_description.world_entity import Body
-from coraplex.exceptions import MissingToolFrame, MissingWaypoints
+from coraplex.exceptions import (
+    FingerWidthNeedsPhysics,
+    MissingToolFrame,
+    MissingWaypoints,
+)
+from coraplex.plans.executables import GiskardExecutable
 from coraplex.robot_plans.mixins import (
     CartesianVelocityLimitParameters,
     GripperStallToleranceParameters,
@@ -55,7 +63,7 @@ class MoveGripperMotion(BaseMotion, GripperStallToleranceParameters):
     The gripper that should be moved.
     """
 
-    allow_gripper_collision: Optional[bool] = None
+    allow_gripper_collision: bool | None = None
     """
     If the gripper is allowed to collide with something.
     """
@@ -86,7 +94,7 @@ class MoveGripperMotion(BaseMotion, GripperStallToleranceParameters):
                 [joint_task, stall_monitor], minimum_success=1, name=name
             )
 
-        accompanying_nodes: List[MotionStatechartNode] = []
+        accompanying_nodes: list[MotionStatechartNode] = []
         if self.finger_velocity is not None:
             accompanying_nodes.append(
                 JointVelocityLimit(
@@ -101,6 +109,67 @@ class MoveGripperMotion(BaseMotion, GripperStallToleranceParameters):
         if not accompanying_nodes:
             return done_node
         return Parallel([done_node, *accompanying_nodes], name=name)
+
+
+@dataclass
+class MoveFingersToWidthMotion(BaseMotion):
+    """
+    Closes a two-finger gripper until its fingertips stand a given distance apart,
+    rather than driving it to a gripper state of its own.
+
+    Closing a gripper all the way onto an object that is not centred between the
+    fingers wedges it sideways instead of holding it, so an object held by contact alone
+    is better met at its own width. Giskard is given the distance between the fingertips
+    as the goal and finds the joint positions that realise it, which is what keeps this
+    independent of how a gripper's fingers are driven.
+
+    ..note:: This only means anything where something pushes back. Where the world is
+        moved kinematically a held object hangs off the tool frame however the fingers
+        stand, and :class:`MoveGripperMotion` says what is meant more directly.
+    """
+
+    gripper: HasTwoFingers
+    """
+    The gripper whose fingers close.
+    """
+
+    width: float
+    """
+    How far apart the fingertips' facing surfaces are to stand, in metres.
+    """
+
+    squeeze: float = 0.0
+    """
+    How far past that width each fingertip is sent, in metres, so the fingers press into
+    an object rather than merely touching it.
+
+    Keep it small, since it is commanded penetration into a body that does not yield.
+    """
+
+    threshold: float = 0.0005
+    """
+    How close, in metres, the fingertips have to come to the goal for the motion to
+    count as done: well under a squeeze, so the squeeze is not lost to the tolerance.
+    """
+
+    def perform(self):
+        return
+
+    @property
+    def _motion_chart(self) -> Task:
+        execution_type = GiskardExecutable.execution_type
+        if execution_type is None or not execution_type.objects_push_back:
+            raise FingerWidthNeedsPhysics(execution_type)
+        fingertips = self.gripper.fingertips
+        return CartesianPosition(
+            root_link=fingertips.finger,
+            tip_link=fingertips.thumb,
+            goal_point=fingertips.finger_P_thumb(
+                max(0.0, self.width - 2 * self.squeeze)
+            ),
+            name="MoveFingersToWidth",
+            threshold=self.threshold,
+        )
 
 
 @dataclass
@@ -121,12 +190,12 @@ class MoveToolCenterPointMotion(
     Arm with the TCP that should be moved to the target.
     """
 
-    allow_gripper_collision: Optional[bool] = None
+    allow_gripper_collision: bool | None = None
     """
     If the gripper can collide with something.
     """
 
-    movement_type: Optional[MovementType] = MovementType.CARTESIAN
+    movement_type: MovementType | None = MovementType.CARTESIAN
     """
     The type of movement that should be performed.
     """
@@ -134,7 +203,7 @@ class MoveToolCenterPointMotion(
     def perform(self):
         return
 
-    def _velocity_limit_nodes(self, root: Body, tip: Body) -> List[Task]:
+    def _velocity_limit_nodes(self, root: Body, tip: Body) -> list[Task]:
         """
         :return: The :class:`CartesianPositionVelocityLimit`/
             :class:`CartesianRotationVelocityLimit` nodes requested via
@@ -190,9 +259,10 @@ class MoveToolCenterPointMotion(
                 translation_threshold=self.resolved_position_threshold(),
                 orientation_threshold=self.resolved_orientation_threshold(),
             )
-        accompanying_nodes: List[MotionStatechartNode] = list(
+        accompanying_nodes: list[MotionStatechartNode] = list(
             self._velocity_limit_nodes(root, tip)
         )
+        accompanying_nodes.extend(self.keep_base_still())
         if self.allow_gripper_collision:
             accompanying_nodes.extend(
                 self._only_allow_gripper_collision_rules(self.arm.end_effector)
@@ -208,7 +278,7 @@ class MoveTCPWaypointsMotion(BaseMotion, HasTcpGoalThresholds):
     Moves the Tool center point (TCP) of the robot.
     """
 
-    waypoints: List[Pose]
+    waypoints: list[Pose]
     """
     Waypoints the TCP should move along.
     """
@@ -218,7 +288,7 @@ class MoveTCPWaypointsMotion(BaseMotion, HasTcpGoalThresholds):
     Arm with the TCP that should be moved to the target.
     """
 
-    allow_gripper_collision: Optional[bool] = None
+    allow_gripper_collision: bool | None = None
     """
     If the gripper can collide with something.
     """
@@ -254,7 +324,11 @@ class MoveTCPWaypointsMotion(BaseMotion, HasTcpGoalThresholds):
             )
             for pose in self.waypoints
         ]
-        return Sequence(nodes=nodes)
+        waypoints = Sequence(nodes=nodes)
+        hold_base = self.keep_base_still()
+        if not hold_base:
+            return waypoints
+        return Parallel([waypoints, *hold_base])
 
 
 @dataclass
@@ -264,7 +338,7 @@ class MoveTCPWaypointsAlignedMotion(BaseMotion, HasTcpGoalThresholds):
     given plane alignments.
     """
 
-    waypoints: List[Point3]
+    waypoints: list[Point3]
     """
     Waypoints the TCP should move along.
     """
@@ -274,17 +348,17 @@ class MoveTCPWaypointsAlignedMotion(BaseMotion, HasTcpGoalThresholds):
     Arm with the TCP that should be moved along the waypoints.
     """
 
-    alignment_pairs: List[AlignmentPair] = field(default_factory=list)
+    alignment_pairs: list[AlignmentPair] = field(default_factory=list)
     """
     Normal pairs kept aligned during the motion.
     """
 
-    allow_gripper_collision: Optional[bool] = None
+    allow_gripper_collision: bool | None = None
     """
     If the gripper can collide with something.
     """
 
-    tip: Optional[Body] = None
+    tip: Body | None = None
     """
     The body that should follow the waypoints.
 
@@ -360,6 +434,7 @@ class MoveTCPWaypointsAlignedMotion(BaseMotion, HasTcpGoalThresholds):
             if self.allow_gripper_collision
             else []
         )
+        motion_statechart_nodes.extend(self.keep_base_still())
         motion_statechart_nodes.append(Parallel(tasks))
         return Parallel(motion_statechart_nodes)
 
@@ -403,4 +478,7 @@ class MoveManipulatorMotion(BaseMotion, HasTcpGoalThresholds):
             binding_policy=GoalBindingPolicy.Bind_on_start,
             name=self.__class__.__name__,
         )
-        return task
+        hold_base = self.keep_base_still()
+        if not hold_base:
+            return task
+        return Parallel([task, *hold_base])

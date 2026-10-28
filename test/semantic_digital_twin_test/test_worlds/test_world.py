@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gc
 import os
 import subprocess
@@ -10,7 +12,6 @@ from uuid import UUID, uuid4
 import numpy as np
 import pytest
 from numpy.testing import assert_raises
-from typing_extensions import Optional, Tuple, Type
 
 from semantic_digital_twin.adapters.urdf import URDFParser
 from semantic_digital_twin.callbacks.callback import (
@@ -566,7 +567,7 @@ def test_transform_a_pose_2d(world_setup):
     world.state[connection.dof.id].position = 1.0
     world.notify_state_change()
 
-    pose_2d = Pose2D(x=2.0, y=0.5, yaw=0.3, reference_frame=l2)
+    pose_2d = Pose2D.from_xy_yaw(x=2.0, y=0.5, yaw=0.3, reference_frame=l2)
 
     relative_pose_2d = world.transform(pose_2d, l1)
 
@@ -1482,7 +1483,7 @@ def test_rebind_a_cycle_keeps_its_shape(world_setup):
     @dataclass(eq=False)
     class Link:
         body: Body
-        partner: Optional["Link"] = None
+        partner: Link | None = None
 
     world, l1, l2, bf, r1, r2 = world_setup
     world_copy = deepcopy(world)
@@ -1592,6 +1593,20 @@ def test_add_entity_with_duplicate_name(world_setup):
     with world.modify_world():
         world.add_kinematic_structure_entity(body_duplicate)
         world.add_connection(connection)
+
+
+def test_limits_from_position_range_and_speed_bound_the_velocity_in_both_directions():
+    limits = DegreeOfFreedomLimits.from_position_range_and_speed(
+        lower_position=-0.2, upper_position=1.5, maximum_speed=0.7
+    )
+    assert limits.lower == DerivativeMap(position=-0.2, velocity=-0.7)
+    assert limits.upper == DerivativeMap(position=1.5, velocity=0.7)
+
+
+def test_limits_from_position_range_and_speed_leave_omitted_bounds_unbounded():
+    limits = DegreeOfFreedomLimits.from_position_range_and_speed(maximum_speed=0.7)
+    assert limits.lower == DerivativeMap(velocity=-0.7)
+    assert limits.upper == DerivativeMap(velocity=0.7)
 
 
 def test_overwrite_dof_limits(world_setup):
@@ -2257,8 +2272,8 @@ def test_move_branch_resets_free_connection_derivatives():
 
 
 def create_world_with_driven_child(
-    drive_type: Type[WheeledDrive],
-) -> Tuple[World, Body, Body]:
+    drive_type: type[WheeledDrive],
+) -> tuple[World, Body, Body]:
     """
     Builds a world where ``driven_child`` hangs off the root by ``drive_type`` and
     ``new_parent`` sits elsewhere under the root.
@@ -2521,10 +2536,7 @@ def test_robot_velocity_limit_setup_does_not_touch_environment_joints():
     robot_link = _make_box_body("robot_link")
     drawer_body = _make_box_body("drawer_body")
 
-    env_limits = DegreeOfFreedomLimits(
-        lower=DerivativeMap(None, -10.0, None, None),
-        upper=DerivativeMap(None, 10.0, None, None),
-    )
+    env_limits = DegreeOfFreedomLimits.from_position_range_and_speed(maximum_speed=10.0)
     with world.modify_world():
         for b in [root, robot_base, robot_link, drawer_body]:
             world.add_kinematic_structure_entity(b)
@@ -2716,7 +2728,7 @@ def test_is_kinematic_structure_entity_in_world_by_name(world_setup):
 # %% moving a branch keeps both worlds replayable
 
 
-def world_with_branch(branch_length: int) -> Tuple[World, Body]:
+def world_with_branch(branch_length: int) -> tuple[World, Body]:
     """
     Build a world whose root carries one branch of the requested length.
 

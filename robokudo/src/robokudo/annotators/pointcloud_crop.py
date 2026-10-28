@@ -1,4 +1,5 @@
-"""Point cloud cropping and visualization.
+"""
+Point cloud cropping and visualization.
 
 This module provides an annotator for:
 
@@ -18,7 +19,7 @@ from timeit import default_timer
 import cv2
 import open3d as o3d
 from py_trees.common import Status
-from typing_extensions import TYPE_CHECKING, Optional
+from typing_extensions import TYPE_CHECKING
 
 from robokudo.annotators.core import BaseAnnotator
 from robokudo.cas import CASViews
@@ -44,32 +45,50 @@ class PointcloudCropAnnotator(BaseAnnotator):
     """
 
     class Descriptor(BaseAnnotator.Descriptor):
-        """Configuration descriptor for point cloud cropping."""
+        """
+        Configuration descriptor for point cloud cropping.
+        """
 
         class Parameters:
-            """Parameters for configuring point cloud cropping."""
+            """
+            Parameters for configuring point cloud cropping.
+            """
 
             def __init__(self) -> None:
                 self.min_x: float = -2.0
-                """Minimum X coordinate"""
+                """
+                Minimum X coordinate
+                """
 
                 self.min_y: float = -2.0
-                """Minimum Y coordinate"""
+                """
+                Minimum Y coordinate
+                """
 
                 self.min_z: float = -9.0
-                """Minimum Z coordinate"""
+                """
+                Minimum Z coordinate
+                """
 
                 self.max_x: float = 2.0
-                """Maximum X coordinate"""
+                """
+                Maximum X coordinate
+                """
 
                 self.max_y: float = 2.0
-                """Maximum Y coordinate"""
+                """
+                Maximum Y coordinate
+                """
 
                 self.max_z: float = 3.0
-                """Maximum Z coordinate"""
+                """
+                Maximum Z coordinate
+                """
 
                 self.relative_to_world: bool = False
-                """Whether to crop the PC in camera/sensor coordinates or whether it shoudl be transformed to world coordinates beforehand."""
+                """
+                Whether to crop the PC in camera/sensor coordinates or whether it shoudl be transformed to world coordinates beforehand.
+                """
 
         # Overwrite the parameters explicitly to enable auto-completion
         parameters = Parameters()
@@ -79,7 +98,8 @@ class PointcloudCropAnnotator(BaseAnnotator):
         name: str = "PointcloudCropAnnotator",
         descriptor: PointcloudCropAnnotator.Descriptor | None = None,
     ) -> None:
-        """Initialize the point cloud cropper.
+        """
+        Initialize the point cloud cropper.
 
         :param name: Name of this annotator instance
         :param descriptor: Configuration descriptor
@@ -87,7 +107,7 @@ class PointcloudCropAnnotator(BaseAnnotator):
         super().__init__(name, descriptor)
         self.rk_logger.debug("%s.__init__()" % self.__class__.__name__)
 
-        self.color: Optional[npt.NDArray] = None
+        self.color: npt.NDArray | None = None
         """A copy of the color image currently being worked with."""
 
     @catch_and_raise_to_blackboard
@@ -114,7 +134,7 @@ class PointcloudCropAnnotator(BaseAnnotator):
         pointcloud_camera_intrinsics = self.get_cas().get(
             CASViews.POINTCLOUD_CAMERA_INTRINSIC
         )
-        color2depth_ratio = self.get_cas().get(CASViews.COLOR2DEPTH_RATIO)
+        color_to_depth_ratio = self.get_cas().get(CASViews.COLOR_TO_DEPTH_RATIO)
 
         #
         # Lookup camera information if the crop should be done relative to the world frame
@@ -162,7 +182,7 @@ class PointcloudCropAnnotator(BaseAnnotator):
         self.get_cas().set_ref(CASViews.CLOUD, cropped_cloud)
         self.get_annotator_output_struct().set_geometries(cropped_cloud)
 
-        mask_scale = 1.0 / color2depth_ratio[0]
+        mask_scale = 1.0 / color_to_depth_ratio.horizontal
         mask = get_mask_from_pointcloud(
             cropped_cloud,
             self.color,

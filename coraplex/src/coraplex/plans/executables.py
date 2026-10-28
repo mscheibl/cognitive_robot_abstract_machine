@@ -4,7 +4,7 @@ from contextlib import AbstractContextManager, ExitStack, nullcontext
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
-from typing_extensions import Callable, List, Dict, ClassVar, Optional, TYPE_CHECKING
+from typing_extensions import Callable, ClassVar, TYPE_CHECKING
 
 from coraplex.datastructures.enums import ExecutionType
 from coraplex.exceptions import (
@@ -36,6 +36,7 @@ from giskardpy.motion_statechart.motion_statechart import (
     MotionStatechart,
     StateHistoryObserver,
 )
+from giskardpy.executor import Executor, NoPacing, Pacer, SteppedSimulationPacer
 from giskardpy.qp.qp_controller_config import QPControllerConfig
 from giskardpy.ros_executor import Ros2Executor
 from krrood.entity_query_language.factories import evaluate_condition
@@ -45,6 +46,7 @@ from semantic_digital_twin.world_description.world_entity import Body
 
 if TYPE_CHECKING:
     from giskardpy.motion_statechart.motion_statechart import StateHistory
+    from semantic_digital_twin.adapters.multi_sim import MujocoSim
     from coraplex.robot_plans.actions.base import ActionDescription
 
     from coraplex.plans.condition_nodes import ConditionNode
@@ -158,7 +160,7 @@ class Executable:
     Base class for executable units.
     """
 
-    execution_list: List[Executable] = field(default_factory=list)
+    execution_list: list[Executable] = field(default_factory=list)
     """
     List of executables that comprises this executable.
     """
@@ -169,7 +171,7 @@ class Executable:
     """
 
     @property
-    def giskard_executables(self) -> List[GiskardExecutable]:
+    def giskard_executables(self) -> list[GiskardExecutable]:
         """
         :return: The giskard executables this unit is made of, in execution order.
         """
@@ -210,13 +212,13 @@ class GiskardExecutable(Executable):
     binds its updaters to the state arrays that adding a node would replace.
     """
 
-    motion_mappings: Dict[MotionNode, Task] = field(default_factory=dict, kw_only=True)
+    motion_mappings: dict[MotionNode, Task] = field(default_factory=dict, kw_only=True)
     """
     Mapping from the motion nodes of the plan to their giskard tasks, in execution
     order.
     """
 
-    pre_condition_node: Optional[ConditionNode] = field(default=None, kw_only=True)
+    pre_condition_node: ConditionNode | None = field(default=None, kw_only=True)
     """
     Optional pre-condition of the action this executable belongs to.
 
@@ -224,7 +226,7 @@ class GiskardExecutable(Executable):
     :meth:`_add_condition_monitors`.
     """
 
-    post_condition_node: Optional[ConditionNode] = field(default=None, kw_only=True)
+    post_condition_node: ConditionNode | None = field(default=None, kw_only=True)
     """
     Optional post-condition of the action this executable belongs to.
 
@@ -232,13 +234,23 @@ class GiskardExecutable(Executable):
     :meth:`_add_condition_monitors`.
     """
 
-    execution_type: ClassVar[Optional[ExecutionType]] = None
+    execution_type: ClassVar[ExecutionType | None] = None
     """
     The execution type used for all giskard executables, managed by
     :py:class:`pycram.motion_executor.ExecutionEnvironment`.
     """
 
     collision_avoidance: ClassVar[bool] = False
+
+    simulation: ClassVar[MujocoSim | None] = None
+    """
+    The physically simulated world a plan is performed in, when the execution type is
+    :attr:`~coraplex.datastructures.enums.ExecutionType.PHYSICALLY_SIMULATED`.
+
+    Shared the way :attr:`execution_type` is, and set by entering a
+    :class:`~coraplex.execution_environment.PhysicallySimulatedRobot`.
+    """
+
     """
     Whether the robot avoids colliding with its surroundings and with itself, managed by
     :py:class:`pycram.motion_executor.ExecutionEnvironment`.
@@ -259,7 +271,7 @@ class GiskardExecutable(Executable):
         return timedelta(minutes=2)
 
     @property
-    def giskard_executables(self) -> List[GiskardExecutable]:
+    def giskard_executables(self) -> list[GiskardExecutable]:
         """
         :return: This executable, which is the only giskard executable it is made of.
         """
@@ -373,7 +385,10 @@ class GiskardExecutable(Executable):
 
         try:
             match GiskardExecutable.execution_type:
-                case ExecutionType.SIMULATED:
+                case (
+                    ExecutionType.KINEMATICALLY_SIMULATED
+                    | ExecutionType.PHYSICALLY_SIMULATED
+                ):
                     self._execute_simulation()
                 case ExecutionType.REAL:
                     self._execute_real()
@@ -387,7 +402,8 @@ class GiskardExecutable(Executable):
     def _execute_simulation(self) -> None:
         """
         Compiles the motion state chart and ticks it in the world of the context until
-        it is done or gives up.
+        it is done or gives up, stepping the physics one control period between two
+        ticks where a simulation is being performed in.
 
         The chart's own stall monitor decides when a motion is hopeless, so a motion
         that keeps converging is never cut off for taking many ticks.
@@ -401,16 +417,51 @@ class GiskardExecutable(Executable):
         :raises MotionExceededSimulationTimeLimit: When the motion runs for longer than
             :attr:`simulation_time_limit`.
         """
-        qp_controller_config = QPControllerConfig.create_with_fast_simulation_defaults()
-        executor = Ros2Executor(
-            context=MotionStatechartContext(
-                world=self.context.world,
-                qp_controller_config=qp_controller_config,
+        if GiskardExecutable.simulation is None:
+            qp_controller_config = (
+                QPControllerConfig.create_with_fast_simulation_defaults()
+            )
+            pacer = NoPacing()
+        else:
+            qp_controller_config = (
+                QPControllerConfig.create_with_physical_simulation_defaults()
+            )
+            pacer = SteppedSimulationPacer(GiskardExecutable.simulation)
+        self._tick_until_done(
+            Ros2Executor(
+                context=MotionStatechartContext(
+                    world=self.context.world,
+                    qp_controller_config=qp_controller_config,
+                ),
+                ros_node=self.context.ros_node,
+                pacer=pacer,
             ),
-            ros_node=self.context.ros_node,
+            qp_controller_config,
+            pacer,
         )
+
+    def _tick_until_done(
+        self,
+        executor: Executor,
+        qp_controller_config: QPControllerConfig,
+        pacer: Pacer,
+    ) -> None:
+        """
+        Tick ``executor`` until the chart ends or gives up, recording the motions it
+        performed and stopping the robot whatever happens.
+
+        :param executor: The executor to tick.
+        :param qp_controller_config: The configuration it was built with.
+        :param pacer: What waits between two ticks, which the executor was built with so
+            that it carries the control rate.
+        :raises MotionExceededSimulationTimeLimit: When the motion runs for longer than
+            :attr:`simulation_time_limit`.
+        """
         time_limit = GiskardExecutable.simulation_time_limit
-        maximum_ticks = time_limit.total_seconds() / qp_controller_config.control_time_step.total_seconds()
+        maximum_ticks = (
+            time_limit.total_seconds()
+            / qp_controller_config.control_time_step.total_seconds()
+        )
         # Stop the robot and tear the chart down even when a tick raises.
         with ExitStack() as cleanup:
             history = MotionPlanHistory(self.motion_state_chart, self.motion_mappings)
@@ -427,7 +478,12 @@ class GiskardExecutable(Executable):
                     if ticks >= maximum_ticks:
                         raise MotionExceededSimulationTimeLimit(time_limit)
                     executor.tick()
+                    pacer.sleep()
                     ticks += 1
+                # The controller stops commanding, so a velocity-servoed base stops too.
+                executor.set_velocity_acceleration_jerk_to_zero()
+                executor.context.world.notify_state_change()
+                pacer.wait_for_standstill()
                 history.end_active_motions()
             except BaseException as error:
                 history.end_active_motions(
@@ -492,8 +548,11 @@ class MoveBranchExecutable(Executable):
 
     def execute(self) -> None:
         """
-        Move the branch and report the attached node's execution outcome.
+        Move the branch, unless a physically simulated world is holding the body by
+        contact already, in which case it is left where the physics puts it.
         """
+        if GiskardExecutable.execution_type == ExecutionType.PHYSICALLY_SIMULATED:
+            return
         with self.execution_scope():
             self.context.world.move_branch(self.body, self.new_parent)
 

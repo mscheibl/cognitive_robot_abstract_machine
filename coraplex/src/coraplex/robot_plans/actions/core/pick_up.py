@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from typing_extensions import Any, Dict
+from typing_extensions import Any
 
 from coraplex.plans.attachment_nodes import ReAttachNode
 from coraplex.plans.plan_node import PlanNode
@@ -57,7 +57,7 @@ class HasGraspChoice:
     The grasp to take hold by.
 
     One of the object's own
-    :meth:`~semantic_digital_twin.grasping.grasp_candidates.HasGraspCandidates.grasp_candidates`.
+    :meth:`~semantic_digital_twin.semantic_annotations.mixins.HasGraspCandidates.grasp_candidates`.
     """
 
     arm: Arm
@@ -85,7 +85,7 @@ class ReachAction(
 
     grasp: GraspCandidate
     """
-    The grasp the tool frame should reach, which also names the object it is on.
+    The grasp the fingers should close on, which also names the object it is on.
     """
 
     reverse_reach_order: bool = False
@@ -139,7 +139,7 @@ class ReachAction(
 
     @staticmethod
     def post_condition(
-        variables: Dict[str, Variable], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Variable], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The end effector needs to be close to the target pose.
@@ -231,7 +231,7 @@ class PickUpAction(
 
     @staticmethod
     def pre_condition(
-        variables: Dict, context: Context, kwargs: Dict[str, Any]
+        variables: dict, context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The gripper needs to be free.
@@ -240,7 +240,7 @@ class PickUpAction(
 
     @staticmethod
     def post_condition(
-        variables: Dict, context: Context, kwargs: Dict[str, Any]
+        variables: dict, context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The object itself needs to be in the gripper, not merely something.
@@ -308,7 +308,7 @@ class GraspingAction(
 
     @staticmethod
     def pre_condition(
-        variables: Dict[str, Any], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Any], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The gripper needs to be free.
@@ -317,7 +317,7 @@ class GraspingAction(
 
     @staticmethod
     def post_condition(
-        variables: Dict[str, Any], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Any], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The object needs to be between the gripper's fingers, or the gripper at the

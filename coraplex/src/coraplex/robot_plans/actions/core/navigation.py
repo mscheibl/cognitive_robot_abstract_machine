@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from typing_extensions import Optional, Any, Dict
+from typing_extensions import Any
 
 from coraplex.datastructures.dataclasses import Context
 from coraplex.exceptions import NoFloorBelowRobot, NotOnASingleLevelException
@@ -18,6 +18,7 @@ from giskardpy.motion_statechart.monitors.joint_monitors import (
 )
 from krrood.entity_query_language.core.variable import Variable
 from krrood.entity_query_language.factories import variable_from, and_, ConditionType
+from semantic_digital_twin.exceptions import MissingMovableJointError
 from semantic_digital_twin.reasoning.predicates import allclose, InsideOf
 from semantic_digital_twin.reasoning.robot_predicates import is_pose_free_for_robot
 from semantic_digital_twin.robots.robot_parts import Camera
@@ -57,7 +58,7 @@ class NavigateAction(ActionDescription):
 
     @staticmethod
     def pre_condition(
-        variables: Dict[str, Variable], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Variable], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The robot needs to have a drive and the target location needs to be free from
@@ -71,7 +72,7 @@ class NavigateAction(ActionDescription):
 
     @staticmethod
     def post_condition(
-        variables: Dict[str, Variable], context: Context, kwargs: Dict[str, Any]
+        variables: dict[str, Variable], context: Context, kwargs: dict[str, Any]
     ) -> ConditionType:
         """
         The robot needs to be within 3 cm of where the heading puts its base.
@@ -94,7 +95,7 @@ class LookAtAction(ActionDescription):
     Position at which the robot should look, given as 6D pose.
     """
 
-    camera: Optional[Camera] = None
+    camera: Camera | None = None
     """
     Camera that should be looking at the target.
     """
@@ -345,18 +346,21 @@ class ElevatorNavigation(ActionDescription):
         """
         nodes = []
         for door in self.elevator.doors:
-            connection = door.mechanical_joint.root.parent_connection
+            if door.movable_joint is None:
+                raise MissingMovableJointError(door)
             nodes.append(
                 JointPositionReached(
-                    connection=connection,
-                    position=connection.dof.limits.upper.position,
+                    connection=door.movable_joint,
+                    position=door.movable_joint.dof.limits.upper.position,
                     threshold=self.arrival_threshold,
                     name=f"{door.name}Open",
                 )
             )
+        if self.elevator.movable_joint is None:
+            raise MissingMovableJointError(self.elevator)
         nodes.append(
             JointPositionReached(
-                connection=self.elevator.mechanical_joint.root.parent_connection,
+                connection=self.elevator.movable_joint,
                 position=self.elevator.drive_position_for_floor(target_floor),
                 threshold=self.arrival_threshold,
                 name="ElevatorAtTargetFloor",

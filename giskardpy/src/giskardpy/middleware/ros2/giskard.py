@@ -4,7 +4,6 @@ import logging
 import os
 import traceback
 from dataclasses import dataclass, field
-from typing import List
 
 import rclpy
 from json_msgs.action import JsonAction
@@ -14,6 +13,7 @@ from giskardpy.data_types.exceptions import NoControlledJointsError
 from giskardpy.executor import Executor
 from giskardpy.middleware.ros2 import rospy
 from giskardpy.middleware.ros2.action_server import ActionServerHandler
+from giskardpy.middleware.ros2.client_presence import ClientWatchdog, HeartbeatPresence
 from giskardpy.middleware.ros2.control_loop import ControlLoop
 from giskardpy.middleware.ros2.feedback_publisher import ActionFeedbackPublisher
 from giskardpy.middleware.ros2.graceful_shutdown import GracefulShutdownSignals
@@ -122,6 +122,9 @@ class Giskard:
         action_server = ActionServerHandler(
             action_name=f"{rospy.get_node().get_name()}/command", action_type=JsonAction
         )
+        client_watchdog = ClientWatchdog(
+            presence=HeartbeatPresence(node=rospy.get_node()),
+        )
         feedback_publisher = ActionFeedbackPublisher(
             executor=self.executor, action_server=action_server
         )
@@ -133,6 +136,7 @@ class Giskard:
         control_loop = ControlLoop(
             executor=self.executor,
             action_server=action_server,
+            client_watchdog=client_watchdog,
             feedback_publisher=feedback_publisher,
             inputs=WorldStateInputs(world=world, reapplies_inputs=True),
             cycle_counter=cycle_counter,
@@ -142,6 +146,7 @@ class Giskard:
             executor=self.executor,
             action_server=action_server,
             control_loop=control_loop,
+            client_watchdog=client_watchdog,
             world_updates=world_updates,
             world_synchronizer=self.world_synchronizer,
             feedback_publisher=feedback_publisher,
@@ -151,14 +156,14 @@ class Giskard:
             post_goal_plotters=self.create_post_goal_plotters(),
         )
 
-    def create_post_goal_plotters(self) -> List[PostGoalPlotter]:
+    def create_post_goal_plotters(self) -> list[PostGoalPlotter]:
         """
         Create the debug plotters that are configured and let them record what they
         need.
         """
         if not self.server_config.debug_mode:
             return []
-        plotters: List[PostGoalPlotter] = []
+        plotters: list[PostGoalPlotter] = []
         if self.server_config.plot_trajectory:
             plotters.append(GoalTrajectoryPlotter(executor=self.executor))
         if self.server_config.plot_gantt_chart:
@@ -227,6 +232,7 @@ class Giskard:
         if self.model_reload_synchronizer is not None:
             self.model_reload_synchronizer.close()
         self.world_fetcher.close()
+        self.motion_server.client_watchdog.presence.stop()
         self.tf_publisher.stop()
         self.viz_marker_publisher.stop()
 
@@ -238,7 +244,7 @@ class Giskard:
         return self.robots[0]
 
     @property
-    def robots(self) -> List[AbstractRobot]:
+    def robots(self) -> list[AbstractRobot]:
         return self.world_config.world.get_semantic_annotations_by_type(AbstractRobot)
 
     def _controlled_joints_sanity_check(self):

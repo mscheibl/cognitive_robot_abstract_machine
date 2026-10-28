@@ -4,26 +4,32 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from functools import cached_property
+from itertools import product
 from types import NoneType
-from typing import Union, get_args, get_origin
-
 from typing_extensions import (
-    Optional,
     TYPE_CHECKING,
-    Type,
     TypeVar,
     Generic,
     TypeVarTuple,
     Unpack,
+    Union,
+    get_args,
+    get_origin,
 )
+
 
 from krrood.ormatic.utils import classproperty
 from krrood.patterns.subclass_safe_generic import (
     SubClassSafeGeneric,
 )
 from krrood.utils import get_existing_field_by_name, get_generic_type_parameters
+from semantic_digital_twin.datastructures.definitions import (
+    GripperState,
+    JointStateType,
+)
 from semantic_digital_twin.datastructures.lidar_reading import LidarReading
 from semantic_digital_twin.reasoning.predicates import LeftOf, RightOf
+from semantic_digital_twin.spatial_types.spatial_types import Point3, Pose, Vector3
 from semantic_digital_twin.robots.exceptions import (
     MissingEndEffectorError,
     MissingInputSourceError,
@@ -43,6 +49,9 @@ from semantic_digital_twin.robots.input_source import InputSource
 
 if TYPE_CHECKING:
     from rclpy.node import Node
+    from semantic_digital_twin.world import World
+    from semantic_digital_twin.world_description.geometry import BoundingBox
+    from semantic_digital_twin.world_description.world_entity import Body
 
 logger = logging.getLogger("semantic_digital_twin")
 
@@ -97,7 +106,7 @@ class HasFingers(
     Mixin class for robots or robot parts that have fingers as their direct children.
     """
 
-    fingers: list[Union[TGenericThumb, Unpack[TGenericFingers]]] = field(
+    fingers: list[TGenericThumb | Unpack[TGenericFingers]] = field(
         default_factory=list, kw_only=True
     )
     """
@@ -128,6 +137,176 @@ class HasFingers(
         return thumb
 
 
+# %% the fingertips a gripper closes with
+
+
+@dataclass
+class Fingertips:
+    """
+    The pair of fingertips a two-finger gripper closes an object between.
+
+    Where a gripper grasps and how wide it stands are read off these two bodies rather
+    than off the gripper's tool frame, which need not sit where the fingers meet.
+    """
+
+    thumb: Body
+    """
+    The tip of the thumb.
+    """
+
+    finger: Body
+    """
+    The tip of the other finger.
+    """
+
+    tool_frame: Body
+    """
+    The frame the measurements are expressed in.
+    """
+
+    closing_axis: Vector3
+    """
+    The axis the fingers close along, in :attr:`tool_frame`.
+    """
+
+    @property
+    def both(self) -> tuple[Body, Body]:
+        """
+        The two tips, thumb first.
+        """
+        return self.thumb, self.finger
+
+    # %% where they meet
+
+    @property
+    def tool_P_grasp(self) -> Point3:
+        """
+        Where the tips meet as the gripper stands, in :attr:`tool_frame`.
+
+        A gripper's tool frame need not sit there, and aiming the tool frame itself at
+        an object then closes the fingers beside it rather than on it. Each tip's own
+        collision bounding box centre stands in for where that finger is, since a tip's
+        link origin may sit at an edge of its mesh rather than at its centre.
+
+        Read it inside a
+        :meth:`~semantic_digital_twin.world.World.reset_state_context` to read it for a
+        state the gripper is not standing in.
+        """
+        thumb, finger = (self._bounding_box(tip).center for tip in self.both)
+        return thumb.midpoint(finger)
+
+    # %% how wide they stand
+
+    @property
+    def separation(self) -> float:
+        """
+        How far apart the tips' facing surfaces stand right now, in metres, measured
+        along :attr:`closing_axis`: the widest object the gripper could close on as it
+        stands.
+
+        Negative where the surfaces already overlap, as a fully closed gripper's may.
+        """
+        thumb_reach, finger_reach = (
+            self._reach_along_closing_axis(tip) for tip in self.both
+        )
+        if thumb_reach[0] > finger_reach[0]:
+            return thumb_reach[0] - finger_reach[1]
+        return finger_reach[0] - thumb_reach[1]
+
+    @property
+    def surface_depth(self) -> float:
+        """
+        How far a tip's facing surface lies inside its own frame, in metres, along
+        :attr:`closing_axis`: a goal stated between the tip frames stands this much
+        wider than the surfaces do on either side.
+        """
+        return (self._frame_distance - self.separation) / 2
+
+    def finger_P_thumb(self, separation: float) -> Point3:
+        """
+        Where the thumb's tip has to reach, in the other tip's frame, to leave the two a
+        given distance apart.
+
+        The surfaces stay parallel, so one tip frame moves purely along the other's
+        closing axis and the distance between them is a one-dimensional goal.
+
+        :param separation: How far apart the facing surfaces are to stand, in metres.
+        :return: The goal for the thumb's tip.
+        """
+        finger_V_thumb = (
+            self._world.compute_forward_kinematics(self.finger, self.tool_frame)
+            @ self.closing_axis
+        )
+        if self._reach_along_closing_axis(self.thumb)[0] < (
+            self._reach_along_closing_axis(self.finger)[0]
+        ):
+            finger_V_thumb = -finger_V_thumb
+        return (finger_V_thumb * self._frame_distance_for(separation)).point3
+
+    # %% reading the geometry
+
+    @property
+    def _world(self) -> World:
+        """
+        The world the tips belong to.
+        """
+        return self.thumb._world
+
+    @property
+    def _frame_distance(self) -> float:
+        """
+        How far apart the tips' own frames stand right now, along :attr:`closing_axis`.
+        """
+        thumb, finger = (
+            self._closing_axis_coordinate(
+                self._world.compute_forward_kinematics(self.tool_frame, tip).position
+            )
+            for tip in self.both
+        )
+        return abs(thumb - finger)
+
+    def _frame_distance_for(self, separation: float) -> float:
+        """
+        :param separation: How far apart the facing surfaces are to stand, in metres.
+        :return: The distance the tip frames have to stand apart to leave them there.
+        """
+        return separation + 2 * self.surface_depth
+
+    def _bounding_box(self, tip: Body) -> BoundingBox:
+        """
+        :param tip: One of the two tips.
+        :return: Its collision bounding box, in :attr:`tool_frame`.
+        """
+        return tip.collision.as_bounding_box_collection_in_frame(
+            self.tool_frame
+        ).bounding_box()
+
+    def _reach_along_closing_axis(self, tip: Body) -> tuple[float, float]:
+        """
+        :param tip: One of the two tips.
+        :return: How far its bounding box reaches along :attr:`closing_axis`, as its
+            nearest and furthest coordinate on that axis.
+        """
+        box = self._bounding_box(tip)
+        corners = product(
+            (box.min_x, box.max_x), (box.min_y, box.max_y), (box.min_z, box.max_z)
+        )
+        coordinates = [
+            self._closing_axis_coordinate(
+                Point3(*corner, reference_frame=self.tool_frame)
+            )
+            for corner in corners
+        ]
+        return min(coordinates), max(coordinates)
+
+    def _closing_axis_coordinate(self, tool_P_point: Point3) -> float:
+        """
+        :param tool_P_point: A point in :attr:`tool_frame`.
+        :return: Where it lies along :attr:`closing_axis`.
+        """
+        return float(tool_P_point.vector3.dot(self.closing_axis))
+
+
 @dataclass(eq=False)
 class HasTwoFingers(
     Generic[TGenericLeftFinger, TGenericRightFinger],
@@ -154,7 +333,7 @@ class HasTwoFingers(
         super().validate()
 
     @property
-    def finger(self) -> Union[TGenericLeftFinger, TGenericRightFinger]:
+    def finger(self) -> TGenericLeftFinger | TGenericRightFinger:
         concrete_thumb_class = get_generic_type_parameters(self, HasFingers)[0]
 
         [finger] = [
@@ -163,6 +342,93 @@ class HasTwoFingers(
             if not isinstance(finger, concrete_thumb_class)
         ]
         return finger
+
+    @property
+    def fingertips(self) -> Fingertips:
+        """
+        The pair of tips this gripper closes an object between, which is what answers
+        where it grasps and how wide it stands.
+        """
+        return Fingertips(
+            thumb=self.thumb.tip,
+            finger=self.finger.tip,
+            tool_frame=self.tool_frame,
+            closing_axis=self.closing_axis,
+        )
+
+    @cached_property
+    def travel_when_closing(self) -> float:
+        """
+        How much further along :attr:`EndEffector.approach_axis` the fingers meet when
+        closed than when open, in metres. Zero for fingers that only slide.
+
+        A constant of the gripper's description, read once and kept. The gripper is put
+        through its own open and closed states to read it, inside a
+        :meth:`~semantic_digital_twin.world.World.reset_state_context` that stands the
+        world back up afterwards.
+        """
+        fingertips = self.fingertips
+        with self._world.reset_state_context():
+            open_P_grasp, closed_P_grasp = (
+                self._meeting_point_in_state(fingertips, state_type)
+                for state_type in (GripperState.OPEN, GripperState.CLOSE)
+            )
+        travelled = closed_P_grasp - open_P_grasp
+        return float(travelled.dot(self.approach_axis))
+
+    def _meeting_point_in_state(
+        self, fingertips: Fingertips, state_type: JointStateType
+    ) -> Point3:
+        """
+        :param fingertips: The tips to read.
+        :param state_type: The state to stand the gripper in.
+        :return: Where the tips meet with the gripper standing in that state.
+
+        ..warning:: This leaves the gripper standing in that state. Call it inside a
+            :meth:`~semantic_digital_twin.world.World.reset_state_context`.
+        """
+        self.get_joint_state_by_type(state_type).apply_to(self._world)
+        return fingertips.tool_P_grasp
+
+    @cached_property
+    def tool_P_grasp_when_closed(self) -> Point3:
+        """
+        Where the fingers meet once closed, in :attr:`tool_frame`.
+
+        Jaws on a linkage carry the meeting point :attr:`travel_when_closing` further
+        out as they close, so where the fingers meet depends on how far the gripper
+        happens to stand open. A grasp planned while open and a release planned while
+        holding would then be aimed at two different points, and an object placed after
+        being picked up would land beside its target by that difference. This is the
+        point an object is held at, which is the one both have to be aimed at.
+
+        A constant of the gripper's description, read once and kept. The same point as
+        :attr:`Fingertips.tool_P_grasp` for fingers that only slide.
+        """
+        with self._world.reset_state_context():
+            return self._meeting_point_in_state(self.fingertips, GripperState.CLOSE)
+
+    # %% reaching and reading back a grasp
+
+    def tool_frame_goal_for_grasp(self, grasp_pose: Pose) -> Pose:
+        """
+        Express a grasp frame as the goal that puts :attr:`tool_P_grasp_when_closed` on
+        it.
+
+        :param grasp_pose: The grasp frame to meet.
+        :return: The pose the tool frame has to reach, in ``grasp_pose``'s frame.
+        """
+        return self.tool_frame_goal_for_point(self.tool_P_grasp_when_closed, grasp_pose)
+
+    @property
+    def held_body_T_grasp(self) -> Pose:
+        """
+        The grasp this gripper has on the body it holds, read at the point it holds an
+        object, which is the point :meth:`tool_frame_goal_for_grasp` aims at.
+
+        :return: The grasp frame, in the held body's frame.
+        """
+        return self.held_body_T_grasp_at(self.tool_P_grasp_when_closed)
 
 
 @dataclass(eq=False)
@@ -173,9 +439,7 @@ class HasSensors(
     Mixin class for robots or robot parts that have sensors.
     """
 
-    sensors: list[Union[Unpack[TGenericSensors]]] = field(
-        default_factory=list, kw_only=True
-    )
+    sensors: list[Unpack[TGenericSensors]] = field(default_factory=list, kw_only=True)
     """
     The list of sensors associated with the robot part.
     """
@@ -218,7 +482,7 @@ class HasArms(Generic[Unpack[TGenericArms]], SubClassSafeGeneric, RobotPartMixin
     Mixin class for robots or robot parts that have arms as their direct children.
     """
 
-    arms: list[Union[Unpack[TGenericArms]]] = field(default_factory=list, kw_only=True)
+    arms: list[Unpack[TGenericArms]] = field(default_factory=list, kw_only=True)
     """
     The list of arms attached to the robot part.
     """
@@ -306,8 +570,8 @@ class HasLeftRightArm(
         return self._assign_left_right_arms(RightOf)
 
     def _assign_left_right_arms(
-        self, relation: Type[Union[LeftOf, RightOf]]
-    ) -> Union[TGenericLeftArm, TGenericRightArm]:
+        self, relation: type[LeftOf | RightOf]
+    ) -> TGenericLeftArm | TGenericRightArm:
         """
         Assigns the left and right arms based on their position relative to the robot's
         root body.
@@ -456,7 +720,7 @@ class HasInputSource(
     part cannot be handed a source meant for another kind of part.
     """
 
-    source: Optional[TGenericInputSource] = field(default=None, kw_only=True)
+    source: TGenericInputSource | None = field(default=None, kw_only=True)
     """
     Where this part is read from.
 
@@ -465,7 +729,7 @@ class HasInputSource(
     """
 
     @classproperty
-    def topic_name(cls) -> Optional[str]:
+    def topic_name(cls) -> str | None:
         """
         The topic the real robot publishes this part's state on, if its description
         names one.
@@ -481,7 +745,7 @@ class HasInputSource(
         super().validate()
 
     @classmethod
-    def source_family(cls) -> Type[TGenericInputSource]:
+    def source_family(cls) -> type[TGenericInputSource]:
         """
         :return: The kind of source this part can be read from.
 

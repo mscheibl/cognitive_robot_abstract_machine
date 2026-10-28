@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 from py_trees.common import Status
 from semantic_digital_twin.world_description.world_entity import Body
-from typing_extensions import TYPE_CHECKING, Dict, List, Optional
+from typing_extensions import TYPE_CHECKING
 
 import robokudo.world as rk_world
 from robokudo.annotators.core import BaseAnnotator
@@ -30,7 +30,7 @@ from robokudo.types.annotation import (
     Classification,
     PoseAnnotation,
 )
-from robokudo.types.cv import ImageROI
+from robokudo.types.cv import ImageROI, Point2D, Rect
 from robokudo.types.scene import ObjectHypothesis
 from robokudo.types.tf import Pose
 from robokudo.utils.annotator_helper import (
@@ -39,7 +39,6 @@ from robokudo.utils.annotator_helper import (
 )
 from robokudo.utils.cv_helper import (
     clamp_bounding_rect,
-    get_scale_coordinates,
     get_scaled_color_image_for_depth_image,
     rect_outside_image,
 )
@@ -84,7 +83,8 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
     """
 
     class Descriptor(BaseAnnotator.Descriptor):
-        """Configuration descriptor for the StaticObjectDetectorAnnotator.
+        """
+        Configuration descriptor for the StaticObjectDetectorAnnotator.
 
         Defines all configurable parameters including:
 
@@ -95,7 +95,9 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
         """
 
         class Parameters:
-            """Parameters controlling the static object detection behavior."""
+            """
+            Parameters controlling the static object detection behavior.
+            """
 
             def __init__(self) -> None:
                 self.bounding_box_x: int = 1
@@ -104,7 +106,9 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
                 self.bounding_box_height: int = 10
 
                 self.mode: StaticObjectMode = StaticObjectMode.BOUNDING_BOX
-                """Defines the mode which mainly decide which sources of information are used to generate the Object Hypothesis"""
+                """
+                Defines the mode which mainly decide which sources of information are used to generate the Object Hypothesis
+                """
 
                 # # If setting this to True, we detect a certain object stored in the ObjectKnowledgeBase
                 # # This allows us to automatically infer the BoundingBox coordinates
@@ -116,23 +120,29 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
                 Only used for StaticObjectMode.BOUNDING_BOX
                 """
 
-                self.class_names: List[str] = []
-                """Used for StaticObjectMode.WORLD_DESCRIPTOR"""
+                self.class_names: list[str] = []
+                """
+                Used for StaticObjectMode.WORLD_DESCRIPTOR
+                """
 
                 self.create_pose_annotation: bool = False
-                """If True a Pose will be created for the object. Pose is relative to the camera frame by default.
+                """
+                If True a Pose will be created for the object. Pose is relative to the camera frame by default.
 
                 Only effective in Mode=StaticObjectDetectorAnnotator.Mode.WORLD_DESCRIPTOR
                 """
 
                 self.create_bounding_box_annotation: bool = False
-                """If True a BoundingBox will be created for the object.
+                """
+                If True a BoundingBox will be created for the object.
 
                 Only effective in Mode=StaticObjectDetectorAnnotator.Mode.WORLD_DESCRIPTOR
                 """
 
                 self.create_mask: bool = True
-                """If this is a true, a mask based on the ROI will be generated that marks every pixel as ON"""
+                """
+                If this is a true, a mask based on the ROI will be generated that marks every pixel as ON
+                """
 
         # Overwrite the parameters explicitly to enable auto-completion
         parameters = Parameters()
@@ -149,16 +159,16 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
         """
         super().__init__(name, descriptor)
         self.rk_logger.debug("%s.__init__()" % self.__class__.__name__)
-        self.color: Optional[npt.NDArray] = None
-        self.depth: Optional[npt.NDArray] = None
-        self.cloud: Optional[o3d.geometry.PointCloud] = None
+        self.color: npt.NDArray | None = None
+        self.depth: npt.NDArray | None = None
+        self.cloud: o3d.geometry.PointCloud | None = None
         self.camera_intrinsics = None
-        self.object_body: Optional[Body] = None
-        self.object_bodies_by_name: Dict[str, Body] = {}
+        self.object_body: Body | None = None
+        self.object_bodies_by_name: dict[str, Body] = {}
 
     def detect_from_bb_descriptor(self, color_rgb: npt.NDArray) -> ObjectHypothesis:
         """
-        Detect only based on the BB.
+        Detect objects using the configured bounding box.
 
         :param color_rgb: Image in RGB order
         """
@@ -313,8 +323,8 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
         return object_hypothesis
 
     def detect_from_body_base(
-        self, world_to_camera_transform_matrix: Optional[npt.NDArray] = None
-    ) -> List[ObjectHypothesis]:
+        self, world_to_camera_transform_matrix: npt.NDArray | None = None
+    ) -> list[ObjectHypothesis]:
         """
         Detect from a completed world descriptor
 
@@ -482,7 +492,8 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
     def add_classification_annotation(
         object_hypothesis: ObjectHypothesis, class_name: str
     ) -> None:
-        """Add a classification annotation to the given object hypothesis.
+        """
+        Add a classification annotation to the given object hypothesis.
 
         :param object_hypothesis: The object hypothesis to annotate.
         :param class_name: The name of the annotation class.
@@ -495,7 +506,7 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
 
     def get_rotation_list_based_on_parameters(
         self, rotation_x: float, rotation_y: float, rotation_z: float, rotation_w: float
-    ) -> List[float]:
+    ) -> list[float]:
         """Return a quaternion based on the parametrization of the Annotator.
 
         :param rotation_x: rotation about x-axis
@@ -517,23 +528,28 @@ class StaticObjectDetectorAnnotator(BaseAnnotator):
     def get_cloud_from_2d_bb_roi(
         self, color_rgb: npt.NDArray
     ) -> o3d.geometry.PointCloud:
+        """
+        Build the point cloud of the depth measurements inside the configured bounding
+        box.
+
+        :param color_rgb: The color image in RGB order, scaled to the depth image
+            resolution.
+        :return: The colored point cloud of the depth measurements inside the box.
+        """
+        parameters = self.descriptor.parameters
+        box = Rect(
+            pos=Point2D(x=parameters.bounding_box_x, y=parameters.bounding_box_y),
+            width=parameters.bounding_box_width,
+            height=parameters.bounding_box_height,
+        )
+        left, top, right, bottom = (
+            self.get_cas()
+            .get(CASViews.COLOR_TO_DEPTH_RATIO)
+            .depth_region(box)
+            .get_corner_points()
+        )
         mask = np.zeros_like(self.depth, dtype=np.uint8)
-        x1 = self.descriptor.parameters.bounding_box_x
-        x2 = (
-            self.descriptor.parameters.bounding_box_x
-            + self.descriptor.parameters.bounding_box_width
+        mask[top:bottom, left:right] = 255
+        return get_cloud_from_rgb_depth_and_mask(
+            color_rgb, self.depth, mask, self.camera_intrinsics, mask_true_value=255
         )
-        y1 = self.descriptor.parameters.bounding_box_y
-        y2 = (
-            self.descriptor.parameters.bounding_box_y
-            + self.descriptor.parameters.bounding_box_height
-        )
-        # Respect possible color2depth scaling also for BoundingBox coordinates
-        color2depth_ratio = self.get_cas().get(CASViews.COLOR2DEPTH_RATIO)
-        sx1, sy1 = get_scale_coordinates(color2depth_ratio, (x1, y1))
-        sx2, sy2 = get_scale_coordinates(color2depth_ratio, (x2, y2))
-        mask[int(sy1) : int(sy2), int(sx1) : int(sx2)] = 255
-        cloud = get_cloud_from_rgb_depth_and_mask(
-            color_rgb, self.depth, mask, self.camera_intrinsics, mask_true_val=255
-        )
-        return cloud

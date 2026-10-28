@@ -4,13 +4,14 @@ from itertools import islice
 
 import numpy as np
 import pytest
-from typing_extensions import Iterator, List, Optional, Tuple
+from typing_extensions import Iterator
 
 from coraplex.datastructures.dataclasses import Context
 from coraplex.locations.base import Location
 from coraplex.locations.costmaps import RingCostmap
 from coraplex.locations.locations import ReachabilityLocation, VisibilityLocation
-from semantic_digital_twin.api import RobotSpecification, WorldSpecification
+from semantic_digital_twin.specifications.robots import RobotSpecification
+from semantic_digital_twin.specifications.worlds import WorldSpecification
 from semantic_digital_twin.datastructures.prefixed_name import PrefixedName
 from semantic_digital_twin.exceptions import ParsingError
 from semantic_digital_twin.robots.pr2 import PR2
@@ -37,7 +38,7 @@ class RecordsHowItWasSampled(Location):
     The single candidate to yield.
     """
 
-    sampled_with: List[Tuple[int, Optional[int]]] = field(default_factory=list)
+    sampled_with: list[tuple[int, int | None]] = field(default_factory=list)
     """
     One entry per call: the number of samples and the seed it sampled with.
     """

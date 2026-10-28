@@ -1,9 +1,13 @@
+from __future__ import annotations
+
+# %% Imports
 import copy
 
 import numpy as np
 import open3d as o3d
 import pytest
 
+from robokudo.types.cv import ColorToDepthRatio
 import robokudo.types.tf
 from robokudo.annotators.core import BaseAnnotator
 from robokudo.annotators.image_preprocessor import ImagePreprocessorAnnotator
@@ -106,7 +110,7 @@ class TestUtilsAnnotatorHelper(object):
     # Pose Transforms #
     ######################
 
-    def test_pose_transform_helper(self, camera_to_world_cas: CAS):
+    def test_pose_transform_helper(self, camera_to_world_cas: CAS) -> None:
         """
         Test pose transform round trip.
         """
@@ -129,7 +133,7 @@ class TestUtilsAnnotatorHelper(object):
         np.testing.assert_array_almost_equal(pos.translation, pose_back.translation)
         np.testing.assert_array_almost_equal(pos.rotation, pose_back.rotation)
 
-    def test_pose_transform_helper_identy_tf(self, identity_cas: CAS):
+    def test_pose_transform_helper_identy_tf(self, identity_cas: CAS) -> None:
         """
         Test pose transform with identity transform.
         """
@@ -174,7 +178,7 @@ class TestUtilsAnnotatorHelper(object):
     # Cloud Transforms #
     ######################
 
-    def test_cloud_transform_helper(self, camera_to_world_cas: CAS):
+    def test_cloud_transform_helper(self, camera_to_world_cas: CAS) -> None:
         """
         Test cloud transform round trip.
         """
@@ -197,7 +201,7 @@ class TestUtilsAnnotatorHelper(object):
         dists = cloud.compute_point_cloud_distance(cloud_back)
         assert np.all(np.asarray(dists) < 1.0e-6)
 
-    def test_cloud_transform_helper_in_place(self, camera_to_world_cas: CAS):
+    def test_cloud_transform_helper_in_place(self, camera_to_world_cas: CAS) -> None:
         """
         Test cloud transform round trip.
         """
@@ -228,7 +232,7 @@ class TestUtilsAnnotatorHelper(object):
         dists = cloud.compute_point_cloud_distance(cloud_back)
         assert np.all(np.asarray(dists) < 1.0e-6)
 
-    def test_cloud_transform_helper_identy_tf(self, identity_cas: CAS):
+    def test_cloud_transform_helper_identy_tf(self, identity_cas: CAS) -> None:
         """
         Test cloud transform with identity transform.
         """
@@ -254,7 +258,9 @@ class TestUtilsAnnotatorHelper(object):
     # Transform Matrices #
     ######################
 
-    def test_get_camera_to_world_transform_matrix(self, camera_to_world_cas: CAS):
+    def test_get_camera_to_world_transform_matrix(
+        self, camera_to_world_cas: CAS
+    ) -> None:
         tf_matrix = get_camera_to_world_transform_matrix(camera_to_world_cas)
         np.testing.assert_allclose(
             tf_matrix,
@@ -283,11 +289,15 @@ class TestUtilsAnnotatorHelper(object):
             ),
         )
 
-    def test_get_camera_to_world_transform_matrix_identity_tf(self, identity_cas: CAS):
+    def test_get_camera_to_world_transform_matrix_identity_tf(
+        self, identity_cas: CAS
+    ) -> None:
         tf_matrix = get_camera_to_world_transform_matrix(identity_cas)
         np.testing.assert_allclose(tf_matrix, np.eye(4))
 
-    def test_get_world_to_camera_transform_matrix(self, camera_to_world_cas: CAS):
+    def test_get_world_to_camera_transform_matrix(
+        self, camera_to_world_cas: CAS
+    ) -> None:
         tf_matrix = get_world_to_camera_transform_matrix(camera_to_world_cas)
         np.testing.assert_allclose(
             tf_matrix,
@@ -318,7 +328,9 @@ class TestUtilsAnnotatorHelper(object):
             ),
         )
 
-    def test_get_world_to_camera_transform_matrix_identity_tf(self, identity_cas: CAS):
+    def test_get_world_to_camera_transform_matrix_identity_tf(
+        self, identity_cas: CAS
+    ) -> None:
         tf_matrix = get_world_to_camera_transform_matrix(identity_cas)
         np.testing.assert_allclose(tf_matrix, np.eye(4))
 
@@ -344,13 +356,13 @@ class TestUtilsAnnotatorHelper(object):
         text_roi = img[0:9, 10:30]  # Text area
         assert np.any(text_roi != 0)
 
-    def test_draw_bounding_boxes_empty_list(self):
+    def test_draw_bounding_boxes_empty_list(self) -> None:
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         img_copy = img.copy()
         draw_bounding_boxes_from_object_hypotheses(img, [], lambda oh: "Test")
         assert np.array_equal(img, img_copy)
 
-    def test_draw_bounding_boxes_invalid_objects(self):
+    def test_draw_bounding_boxes_invalid_objects(self) -> None:
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         img_copy = img.copy()
         invalid_oh = "Not an ObjectHypothesis"
@@ -377,7 +389,10 @@ class TestUtilsAnnotatorHelper(object):
         scalex, scaley = scale_factor
 
         cas = annotator_in_pipeline.get_cas()
-        cas.set(robokudo.cas.CASViews.COLOR2DEPTH_RATIO, (scalex, scaley))
+        cas.set(
+            robokudo.cas.CASViews.COLOR_TO_DEPTH_RATIO,
+            ColorToDepthRatio(horizontal=scalex, vertical=scaley),
+        )
         annotator_in_pipeline.camera_intrinsics = copy.deepcopy(kinect_intrinsics)
 
         scale_camera_intrinsics(annotator_in_pipeline)
@@ -420,7 +435,10 @@ class TestUtilsAnnotatorHelper(object):
             robokudo.cas.CASViews.COLOR_IMAGE,
             np.zeros((height, width, 3), dtype=np.uint8),
         )
-        cas.set(robokudo.cas.CASViews.COLOR2DEPTH_RATIO, (scalex, scaley))
+        cas.set(
+            robokudo.cas.CASViews.COLOR_TO_DEPTH_RATIO,
+            ColorToDepthRatio(horizontal=scalex, vertical=scaley),
+        )
 
         annotator_in_pipeline.camera_intrinsics = copy.deepcopy(kinect_intrinsics)
 
@@ -457,7 +475,7 @@ class TestUtilsAnnotatorHelper(object):
         image = np.zeros((height, width, 3), dtype=np.uint8)
 
         cas.set(robokudo.cas.CASViews.COLOR_IMAGE, image)
-        cas.set(robokudo.cas.CASViews.COLOR2DEPTH_RATIO, None)
+        cas.set(robokudo.cas.CASViews.COLOR_TO_DEPTH_RATIO, None)
 
         assert get_color_image(annotator_in_pipeline) == None
 
@@ -482,7 +500,10 @@ class TestUtilsAnnotatorHelper(object):
         width, height = kinect_intrinsics.width, kinect_intrinsics.height
         scalex, scaley = scale_factor
 
-        cas.set(robokudo.cas.CASViews.COLOR2DEPTH_RATIO, (scalex, scaley))
+        cas.set(
+            robokudo.cas.CASViews.COLOR_TO_DEPTH_RATIO,
+            ColorToDepthRatio(horizontal=scalex, vertical=scaley),
+        )
         mask = np.zeros((int(height * scaley), int(width * scalex), 3), dtype=np.uint8)
         mask = resize_mask(annotator_in_pipeline, mask)
         assert mask.shape[:2] == (
@@ -490,11 +511,13 @@ class TestUtilsAnnotatorHelper(object):
             1024,
         ), f"Mask should be rescaled by scalex={scalex}, scaley={scaley}"
 
-    def test_resize_mask_invalid_depth(self, annotator_in_pipeline: BaseAnnotator):
+    def test_resize_mask_invalid_depth(
+        self, annotator_in_pipeline: BaseAnnotator
+    ) -> None:
         annotator_in_pipeline.descriptor.parameters.global_with_depth = True
 
         cas = annotator_in_pipeline.get_cas()
-        cas.set(robokudo.cas.CASViews.COLOR2DEPTH_RATIO, None)
+        cas.set(robokudo.cas.CASViews.COLOR_TO_DEPTH_RATIO, None)
 
         mask = np.zeros((640, 480, 3), dtype=np.uint8)
         assert pytest.raises(RuntimeError, resize_mask, annotator_in_pipeline, mask)
@@ -512,7 +535,7 @@ class TestUtilsAnnotatorHelper(object):
 
         assert np.array_equal(mask, resized_mask)
 
-    def test_generate_source_name(self, annotator_in_pipeline: BaseAnnotator):
+    def test_generate_source_name(self, annotator_in_pipeline: BaseAnnotator) -> None:
         name = generate_source_name(annotator_in_pipeline)
         assert name, f"source name should be non-empty"
         assert type(name) is str, f"source name should be a string"

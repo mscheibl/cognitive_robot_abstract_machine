@@ -3,14 +3,14 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from typing_extensions import TYPE_CHECKING, Generic, List, Optional, cast
+from typing_extensions import TYPE_CHECKING, Generic, cast
 
 from coraplex.datastructures.enums import (
     DetectionTechnique,
     InsertionPosition,
     ReachFraction,
 )
-from coraplex.exceptions import ReachHasNoFinalApproach
+from coraplex.exceptions import GraspHasNoClosingMotion, ReachHasNoFinalApproach
 from coraplex.locations.locations import ReachabilityLocation
 from coraplex.plans.plan_node import ActionLike, ActionNode, MotionNode, PlanNode
 from coraplex.plans.underspecified import UnderspecifiedNode
@@ -20,7 +20,12 @@ from coraplex.plans.plan_transformation import (
     MatchedType,
     PlanTransformation,
 )
+from coraplex.plans.executables import GiskardExecutable
 from coraplex.robot_plans import MoveToolCenterPointMotion
+from coraplex.robot_plans.motions.gripper import (
+    MoveFingersToWidthMotion,
+    MoveGripperMotion,
+)
 from coraplex.robot_plans.actions.composite.facing import FaceAndLookAtAction
 from coraplex.robot_plans.actions.composite.transporting import (
     MoveAndOpenAction,
@@ -34,17 +39,21 @@ from coraplex.robot_plans.actions.core.navigation import (
     LookAtAction,
     NavigateAction,
 )
-from coraplex.robot_plans.actions.core.pick_up import PickUpAction, ReachAction
+from coraplex.robot_plans.actions.core.pick_up import (
+    GraspingAction,
+    PickUpAction,
+    ReachAction,
+)
 from coraplex.robot_plans.actions.core.robot_body import ParkArmsAction
 from krrood.entity_query_language.core.variable import Variable
 from krrood.entity_query_language.factories import a, variable
 from krrood.entity_query_language.query.match import Match
 from krrood.patterns.subclass_safe_generic import SubClassSafeGeneric
 from semantic_digital_twin.reasoning.predicates import InsideOf
-from semantic_digital_twin.grasping.grasp_candidates import (
-    GraspCandidate,
-    HasGraspCandidates,
-)
+from semantic_digital_twin.grasping.grasp_candidates import GraspCandidate
+from semantic_digital_twin.semantic_annotations.mixins import HasGraspCandidates
+from semantic_digital_twin.datastructures.definitions import GripperState
+from semantic_digital_twin.robots.robot_part_mixins import HasTwoFingers
 from semantic_digital_twin.robots.robot_parts import Arm
 from semantic_digital_twin.semantic_annotations.mixins import HasRootBody
 from semantic_digital_twin.semantic_annotations.semantic_annotations import Drawer
@@ -93,7 +102,7 @@ class DetectBeforeGrasp(InsertionTransformation[ReachAction]):
     def anchor(self, plan_node: ActionNode) -> PlanNode:
         return self.final_approach(plan_node)
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         reach = cast(ReachAction, plan_node.action)
         return [
             LookAtAction(self.final_approach(plan_node).motion.target),
@@ -135,7 +144,7 @@ class DrawerOpening(
 
     def _closed_drawers_containing(
         self, annotation: HasRootBody, world: World
-    ) -> List[Drawer]:
+    ) -> list[Drawer]:
         """
         :param annotation: The object to locate
         :param world: The world the object and the drawers belong to
@@ -152,7 +161,7 @@ class DrawerOpening(
 
     def opening_nodes(
         self, drawer: Drawer, arm: Arm, context: Context
-    ) -> List[ActionLike]:
+    ) -> list[ActionLike]:
         """
         :param drawer: The drawer to open
         :param arm: The arm that opens it
@@ -198,7 +207,7 @@ class OpenDrawerBeforePickUp(DrawerOpening[PickUpAction]):
             self._closed_drawers_containing(pick_up.grasp.graspable, pick_up.world)
         )
 
-    def nodes_to_insert(self, plan_node: ActionNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: ActionNode) -> list[ActionLike]:
         pick_up = cast(PickUpAction, plan_node.action)
         graspable = pick_up.grasp.graspable
         nodes = []
@@ -262,7 +271,7 @@ class OpenDrawerBeforeMoveAndPickUp(DrawerOpening[MoveAndPickUpAction]):
 
     def nodes_to_insert(
         self, plan_node: ActionNode | UnderspecifiedNode
-    ) -> List[ActionLike]:
+    ) -> list[ActionLike]:
         target = self._pick_up_target(plan_node)
         nodes = []
         for drawer in self._closed_drawers_containing(
@@ -277,7 +286,7 @@ class OpenDrawerBeforeMoveAndPickUp(DrawerOpening[MoveAndPickUpAction]):
 
     def _pick_up_target(
         self, plan_node: ActionNode | UnderspecifiedNode
-    ) -> Optional[PickUpTarget]:
+    ) -> PickUpTarget | None:
         """
         :param plan_node: A node this matches.
         :return: What the move-and-pick-up picks up and with which arm, or ``None`` if
@@ -293,7 +302,7 @@ class OpenDrawerBeforeMoveAndPickUp(DrawerOpening[MoveAndPickUpAction]):
     @staticmethod
     def _pick_up_target_shared_by_candidates_of(
         move_and_pick_up: Match[MoveAndPickUpAction],
-    ) -> Optional[PickUpTarget]:
+    ) -> PickUpTarget | None:
         """
         :param move_and_pick_up: A move-and-pick-up still to be grounded.
         :return: The object and arm every one of its candidates picks up with, or
@@ -373,5 +382,72 @@ class ParkArmsBeforeFirstAction(InsertionTransformation[ActionNode]):
     def anchor(self, plan_node: PlanNode) -> PlanNode:
         return plan_node
 
-    def nodes_to_insert(self, plan_node: PlanNode) -> List[ActionLike]:
+    def nodes_to_insert(self, plan_node: PlanNode) -> list[ActionLike]:
         return [ParkArmsAction(plan_node.action.robot.all_arms)]
+
+
+# %% holding an object at its own width
+
+
+@dataclass
+class CloseFingersToObjectWidth(PlanTransformation[GraspingAction]):
+    """
+    Closes a grasp onto the width of the object it takes hold of, instead of shutting
+    the gripper onto it.
+
+    Shutting the gripper all the way onto an object that is not centred between the
+    fingers wedges it sideways instead of holding it, so a robot whose grasp holds by
+    contact alone meets the object at its own width. The width is measured on the
+    object, so nothing has to be told per object.
+    """
+
+    squeeze: float = 0.0
+    """
+    How far past the object's width each finger is sent, in metres, so the fingers press
+    into it rather than merely touching it.
+    """
+
+    def is_applicable(self, plan_node: ActionNode) -> bool:
+        execution_type = GiskardExecutable.execution_type
+        grasp = cast(GraspingAction, plan_node.action)
+        return (
+            execution_type is not None
+            and execution_type.objects_push_back
+            and isinstance(grasp.arm.end_effector, HasTwoFingers)
+            and grasp.grasp.graspable.root.has_collision()
+        )
+
+    def apply(self, plan_node: ActionNode) -> None:
+        grasp = cast(GraspingAction, plan_node.action)
+        shutting = self.closing_motion(plan_node)
+        plan = plan_node.plan
+        plan.insert_before(
+            shutting,
+            make_node(
+                MoveFingersToWidthMotion(
+                    gripper=grasp.arm.end_effector,
+                    width=grasp.grasp.width_along_closing_axis,
+                    squeeze=self.squeeze,
+                )
+            ),
+        )
+        plan.remove_node(shutting)
+
+    @staticmethod
+    def closing_motion(plan_node: ActionNode) -> MotionNode:
+        """
+        :param plan_node: The node of the grasp.
+        :raises GraspHasNoClosingMotion: If no motion shutting the gripper lies below
+            the grasp's node.
+        :return: The motion the grasp shuts its gripper with.
+        """
+        motions = [
+            node
+            for node in plan_node.descendants
+            if isinstance(node, MotionNode)
+            and isinstance(node.motion, MoveGripperMotion)
+            and node.motion.motion is GripperState.CLOSE
+        ]
+        if not motions:
+            raise GraspHasNoClosingMotion(plan_node)
+        return motions[-1]

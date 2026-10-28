@@ -11,7 +11,6 @@ import pathlib
 import time
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import List
 
 import plotly.graph_objects as go
 import tqdm
@@ -20,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 
 import coraplex.orm.ormatic_interface  # type: ignore  # noqa: F401
 from coraplex.datastructures.dataclasses import Context
-from coraplex.execution_environment import simulated_robot
+from coraplex.execution_environment import kinematically_simulated_robot
 from coraplex.orm.ormatic_interface import Base, PlanMappingDAO  # type: ignore
 from coraplex.plans.factories import sequential
 from coraplex.robot_plans.actions.core.navigation import NavigateAction
@@ -134,7 +133,7 @@ class ORMaticReliabilityExperimentResult(ExperimentResult):
 
     plan_execution_duration: float
     """
-    Seconds to execute the plan under simulated_robot.
+    Seconds to execute the plan under kinematically_simulated_robot.
     """
 
     to_data_access_object_duration: float
@@ -176,7 +175,7 @@ class ORMaticReliabilityAggregateResult(ExperimentResult):
 
     plan_execution_duration: MeanAndStandardDeviation
     """
-    Mean and standard deviation of plan execution time under simulated_robot (seconds).
+    Mean and standard deviation of plan execution time under kinematically_simulated_robot (seconds).
     """
 
     to_data_access_object_duration: MeanAndStandardDeviation
@@ -220,7 +219,7 @@ def reliability_experiment(
     plan = create_plan(world, context, plan_size)
 
     t0 = time.perf_counter()
-    with simulated_robot:
+    with kinematically_simulated_robot:
         plan.perform()
     plan_execution_duration = time.perf_counter() - t0
 
@@ -264,7 +263,7 @@ def reliability_experiment(
 def run_reliability_experiment(
     plan_size: int,
     iterations: int = 10,
-) -> tuple[ORMaticReliabilityAggregateResult, List[ORMaticReliabilityExperimentResult]]:
+) -> tuple[ORMaticReliabilityAggregateResult, list[ORMaticReliabilityExperimentResult]]:
     """
     Run *iterations* reliability experiment cycles for plans of *plan_size* actions and
     aggregate the results.
@@ -311,7 +310,7 @@ def run_reliability_experiment(
 
 
 def plot_reliability(
-    raw_results: List[ORMaticReliabilityExperimentResult],
+    raw_results: list[ORMaticReliabilityExperimentResult],
 ) -> go.Figure:
     """
     Produce a grouped violin plot of plan size vs duration for each timing phase.
@@ -352,7 +351,7 @@ def plot_reliability(
 
 def main():
     aggregate_results = []
-    all_raw: List[ORMaticReliabilityExperimentResult] = []
+    all_raw: list[ORMaticReliabilityExperimentResult] = []
     for plan_size in tqdm.tqdm(
         [
             1,

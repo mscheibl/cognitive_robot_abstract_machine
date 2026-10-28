@@ -4,7 +4,6 @@ import asyncio
 from copy import deepcopy
 from dataclasses import dataclass, field
 from time import sleep
-from typing import Set
 
 import numpy as np
 import pytest
@@ -63,6 +62,7 @@ from giskardpy.motion_statechart.tasks.joint_tasks import (
 from giskardpy.motion_statechart.tasks.pointing import Pointing
 from giskardpy.qp.qp_controller_config import QPControllerConfig
 from giskardpy.middleware.ros2.exceptions import (
+    ClientDisconnectedError,
     ExecutionCanceledException,
     ExecutionAbortedException,
     WorldModelModifiedDuringMotionError,
@@ -90,6 +90,8 @@ from semantic_digital_twin.world_description.world_entity import (
     Body,
     KinematicStructureEntity,
 )
+
+from .test_client_presence import wait_until
 
 
 @dataclass
@@ -183,10 +185,10 @@ class PR2Tester(GiskardTester):
             if "right" in str(end_effector.name).lower()
         )
 
-    def get_l_gripper_links(self) -> Set[Body]:
+    def get_l_gripper_links(self) -> set[Body]:
         return set(b for b in self.l_gripper_annotation.bodies if b.has_collision())
 
-    def get_r_gripper_links(self) -> Set[Body]:
+    def get_r_gripper_links(self) -> set[Body]:
         return set(b for b in self.r_gripper_annotation.bodies if b.has_collision())
 
     def get_r_forearm_links(self):
@@ -1873,6 +1875,44 @@ class TestActionServerEvents:
 
         with pytest.raises(ExecutionCanceledException):
             await giskard.api.get_result()
+
+    @pytest.mark.asyncio
+    async def test_a_goal_whose_client_stops_announcing_itself_is_aborted(
+        self, giskard: PR2Tester
+    ):
+        """
+        Nobody is waiting for a motion whose client died, so it is stopped instead of
+        being driven to its end.
+
+        The motion ends by itself after a while, so that a client that is not noticed
+        leaving fails this test instead of keeping the goal running forever.
+        """
+        msc = MotionStatechart()
+        msc.add_node(
+            CartesianPose(
+                root_link=giskard.map,
+                tip_link=giskard.base_footprint,
+                goal_pose=HomogeneousTransformationMatrix.from_xyz_rpy(
+                    x=0.5, reference_frame=giskard.base_footprint
+                ),
+            )
+        )
+        msc.add_node(give_up := CountSeconds(seconds=30))
+        msc.add_node(EndMotion.when_true(give_up))
+        giskard.api.announce_presence()
+        goal_accepted_future = giskard.api.execute_async(msc)
+        wait_for_future_to_complete(goal_accepted_future)
+        client_watchdog = giskard.giskard.motion_server.client_watchdog
+        assert wait_until(
+            lambda: client_watchdog.presence.watched_client == giskard.api.client,
+            timeout=30.0,
+        )
+
+        giskard.api.heartbeat_publisher.stop()
+
+        with pytest.raises(ClientDisconnectedError) as disconnect:
+            await giskard.api.get_result()
+        assert disconnect.value.client == giskard.api.client
 
     def test_empty_goal(self, giskard: PR2Tester):
         with pytest.raises(EmptyMotionStatechartError):
