@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -2680,7 +2681,7 @@ class TestLifeCycleTransitions:
 
         assert unpause.observation_state == ObservationStateValues.TRUE
 
-    def test_long_pause(self):
+    def test_long_pause(self, tmp_path: Path) -> None:
         msc = MotionStatechart()
         msc.add_nodes(
             [
@@ -2694,7 +2695,7 @@ class TestLifeCycleTransitions:
         kin_sim = Executor(MotionStatechartContext(world=World()))
         kin_sim.compile(motion_statechart=msc)
         kin_sim.tick_until_end()
-        msc.plot_gantt_chart()
+        msc.plot_gantt_chart(str(tmp_path / "ganttchart.pdf"))
 
         assert len(msc.history) == 5
 
