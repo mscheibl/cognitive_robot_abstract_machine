@@ -15,7 +15,7 @@ from semantic_digital_twin.robots.minimal_robot import MinimalRobot
 from coraplex.execution_environment import kinematically_simulated_robot
 from coraplex.plans.attachment_nodes import ReAttachNode
 from coraplex.plans.executables import MotionPlanHistory
-from coraplex.plans.factories import code, parallel, sequential
+from coraplex.plans.factories import code, parallel, sequential, try_in_order
 from coraplex.plans.failures import PlanFailure
 from coraplex.plans.plan import Plan
 from coraplex.plans.plan_callbacks import PlanCallback
@@ -818,14 +818,43 @@ def test_parallel_plan_reports_failed_native_verdict(
         motion_mappings={node: motion.task},
     )
     monkeypatch.setattr(node, "parse", Mock(return_value=executable))
-    root = parallel([node])
+    root = parallel([node, code(lambda: None)])
 
     with kinematically_simulated_robot, pytest.raises(PlanFailure):
-        root.notify()
+        root.perform()
 
     assert node.status is LifeCycleValues.FAILED
     assert node.execution_error is None
     assert node.reason is None
+
+
+def test_try_in_order_tries_the_next_child_after_a_failed_native_verdict(
+    monkeypatch, tracked_motion, cylinder_bot_world
+) -> None:
+    """An alternative whose native task verdict is unsuccessful counts as failed."""
+    node = tracked_motion
+    motion = RecordedMotion()
+    executor = SuccessfulExecution(
+        motion, failure=None, observation=ObservationStateValues.FALSE
+    )
+    monkeypatch.setattr(executables, "Ros2Executor", Mock(return_value=executor))
+    robot = cylinder_bot_world.get_semantic_annotations_by_type(MinimalRobot)[0]
+    executable = executables.GiskardExecutable(
+        context=Context(cylinder_bot_world, robot),
+        root_node=Goal(),
+        motion_state_chart=motion.chart,
+        motion_mappings={node: motion.task},
+    )
+    monkeypatch.setattr(node, "parse", Mock(return_value=executable))
+    next_child_calls = []
+    root = try_in_order([node, code(lambda: next_child_calls.append(None))])
+
+    with kinematically_simulated_robot:
+        root.perform()
+
+    assert node.status is LifeCycleValues.FAILED
+    assert len(next_child_calls) == 1
+    assert root.status is LifeCycleValues.SUCCEEDED
 
 
 # %% node-owned execution scopes
