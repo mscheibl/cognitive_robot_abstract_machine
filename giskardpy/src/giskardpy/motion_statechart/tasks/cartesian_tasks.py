@@ -20,7 +20,6 @@ from giskardpy.motion_statechart.data_types import (
 from giskardpy.motion_statechart.exceptions import GoalPointsReferenceFrameMismatchError
 from giskardpy.motion_statechart.goals.templates import Parallel
 from giskardpy.motion_statechart.error_signals import (
-    joint_position_and_velocity_variables,
     time_derivative_from_joint_motion,
 )
 from giskardpy.motion_statechart.graph_node import (
@@ -840,9 +839,9 @@ class CartesianPositionVelocityLimit(Task):
     """
     max_linear_velocity: float = field(default=0.1, kw_only=True)
     """
-    Maximum allowed linear speed of the tip in meters per second (m/s).
-    Default: 0.1 m/s. The enforcement ensures the Euclidean norm of the
-    tip-frame translational velocity does not exceed this value.
+    Maximum allowed linear speed of the tip along each axis of the root link, in meters
+    per second (m/s). A motion along a diagonal of the root link may reach up to
+    sqrt(3) times this speed.
     """
     weight: float = field(
         default=DefaultWeights.WEIGHT_ABOVE_COLLISION_AVOIDANCE, kw_only=True
@@ -864,14 +863,13 @@ class CartesianPositionVelocityLimit(Task):
             quadratic_weight=self.weight,
         )
 
-        position_variables, velocity_variables = joint_position_and_velocity_variables(
-            root_P_tip
+        artifacts.observation = sm.logic_and(
+            *(
+                sm.abs(time_derivative_from_joint_motion(coordinate))
+                <= self.max_linear_velocity
+                for coordinate in (root_P_tip.x, root_P_tip.y, root_P_tip.z)
+            )
         )
-        root_P_tip_dot = root_P_tip.total_derivative(
-            position_variables, velocity_variables
-        )
-
-        artifacts.observation = root_P_tip_dot.norm() <= self.max_linear_velocity
 
         return artifacts
 
