@@ -25,7 +25,7 @@ from semantic_digital_twin.spatial_types import (
     HomogeneousTransformationMatrix,
 )
 from cramera.logging_setup import get_logger
-from cramera.camera import CalibrationMark, ShownCamera
+from cramera.camera import ScenePosition, ShownCamera
 from cramera.config import CrameraConfig
 from cramera.body_geometry import NumericPose, POSE_PRECISION, rounded_pose
 from semantic_digital_twin.world_description.connections import (
@@ -501,9 +501,9 @@ class Bridge:
     started showing them.
     """
 
-    calibration_mark: CalibrationMark | None = None
+    calibration_mark: ScenePosition | None = None
     """
-    The mark the viewer draws over the scene for a person to point at; None draws
+    Where the viewer draws a mark over the scene for a person to point at; None draws
     none.
     """
 
@@ -1357,7 +1357,7 @@ class Bridge:
             ]
         return earlier[-1] if earlier else None
 
-    def show_calibration_mark(self, mark: CalibrationMark | None) -> None:
+    def show_calibration_mark(self, mark: ScenePosition | None) -> None:
         """
         :param mark: The mark the viewer is to draw over the scene; None hides it.
         """
