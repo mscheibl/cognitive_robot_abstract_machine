@@ -2,7 +2,11 @@
 Configuration shared by a live Cramera visualization session.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
+
+from cramera.camera import AutomaticCamera
 
 
 # %% live visualization
@@ -20,4 +24,10 @@ class CrameraConfig:
     rebind_interval_seconds: float = 3.0
     """
     Time between periodic discoveries of the world's bodies and connections.
+    """
+
+    automatic_camera: AutomaticCamera | None = None
+    """
+    How the viewer points its camera on its own when asked to; None leaves the camera to
+    the viewer.
     """

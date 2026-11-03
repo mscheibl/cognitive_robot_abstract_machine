@@ -39,6 +39,12 @@ world-discovery interval and placeholder object dimensions. Pass it as
 `Bridge(configuration=...)` when constructing a custom bridge for `LiveVisualization`.
 Each bridge gets its own configuration by default.
 
+For an audience watching the robot, `CrameraConfig(automatic_camera=...)` takes a
+`cramera.camera.AutomaticCamera`, and the viewer opened with
+`?layout=scene&camera=automatic` points its camera on its own: a fixed overview while
+the robot's base moves, and a view facing the robot from the front once the base rests.
+The viewer cannot orbit in that mode.
+
 The scene supports orbit, pan, zoom, robot following and click-to-inspect. The graph
 panel displays the plan, statecharts, robot kinematics and transforms. EQL results
 can highlight entities in the scene and replay a recorded time interval.

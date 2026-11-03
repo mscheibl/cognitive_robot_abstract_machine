@@ -22,6 +22,8 @@ HTTP endpoints of the live bridge (default port 8765).
                       freshness, ageSeconds}]}  the world's connection graph and how
                       recently each connection moved (see
                       :mod:`cramera.live.transforms`)
+    GET /camera  {camera}  the session's automatic camera (see
+                  :class:`cramera.camera.AutomaticCamera`), or {camera: null}
     GET /recording  {state: idle|recording|finalized, frameCount, durationSeconds,
                       sceneName}  see :mod:`cramera.live.recording`
     POST /recording/stop     finalize the current recording into a scene bundle under
@@ -175,8 +177,19 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return self._send_json(self.bridge.status())
         if self.path.startswith("/recording"):
             return self._send_json(self._recording_status())
+        if self.path.startswith("/camera"):
+            return self._send_automatic_camera()
         self.send_response(404)
         self.end_headers()
+
+    def _send_automatic_camera(self) -> None:
+        """
+        Serve how the viewer points its camera on its own, or None when it should not.
+        """
+        camera = self.bridge.configuration.automatic_camera
+        if camera is None:
+            return self._send_json({"camera": None})
+        return self._send_json({"camera": asdict(camera)})
 
     def _send_query_presets(self) -> None:
         """
