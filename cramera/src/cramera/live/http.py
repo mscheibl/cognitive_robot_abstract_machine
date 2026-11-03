@@ -55,6 +55,7 @@ from dataclasses import asdict, dataclass
 
 from typing_extensions import Any, ClassVar, Type
 
+from cramera.camera import ShownCamera
 from cramera.knowledge.query_vocabulary import UnknownVocabularyName
 from cramera.knowledge.queryable_knowledge import QueryScope, UnknownQueryScope
 from cramera.live.bridge import Bridge
@@ -328,6 +329,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return self._discard_recording()
         if self.path == "/recording/save":
             return self._save_recording()
+        if self.path == "/camera/shown":
+            return self.record_shown_camera()
         self._send_json({"ok": False, "error": "unknown endpoint"}, 404)
 
     def _posted_payload(self) -> dict[str, Any] | None:
@@ -340,6 +343,19 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return None
         return payload if isinstance(payload, dict) else None
+
+    def record_shown_camera(self) -> None:
+        """
+        Note the camera the viewer reports it started to show the scene through.
+        """
+        payload = self._posted_payload()
+        camera = None if payload is None else ShownCamera.from_json(payload)
+        if camera is None:
+            return self._send_json(
+                {"ok": False, "error": "body must describe a shown camera"}, code=400
+            )
+        self.bridge.record_shown_camera(camera)
+        return self._send_json({"ok": True})
 
     def answer_requested_query(self) -> None:
         """

@@ -898,6 +898,7 @@ Panels.define('robot-scene', function (root, bus) {
   // than flying through the scene.
   let automaticCamera = null;    // {settings, views} once the bridge sent one
   let automaticCameraShot = null;  // what the camera was last aimed for: view and base pose
+  let shownView = null;            // the view the automatic camera shows the scene from
   const obstacleRay = new THREE.Raycaster();
   function worldPoint(zUp) {
     worldRoot.updateWorldMatrix(true, false);
@@ -928,6 +929,23 @@ Panels.define('robot-scene', function (root, bus) {
     camera.position.copy(worldPoint(view.position));
     controls.target.copy(worldPoint(view.target));
     needsRender = true;
+    shownView = view;
+    reportShownCamera();
+  }
+  //: tell the bridge the camera the scene is shown through from now on, so a spot
+  //: pointed at on the screen can be found in the world
+  function reportShownCamera() {
+    if (!shownView || !liveOn) return;
+    const report = ScreenPointing.shownCameraReport(shownView, camera.fov, camera.aspect, Date.now());
+    fetch(liveUrl() + '/camera/shown', { method: 'POST', body: JSON.stringify(report) })
+      .catch(function () {});
+  }
+  // %% calibration mark: where a person is asked to point at the screen
+  const calibrationMark = document.createElement('div');
+  calibrationMark.className = 'calibration-mark';
+  container.appendChild(calibrationMark);
+  function showCalibrationMark(mark) {
+    Object.assign(calibrationMark.style, ScreenPointing.markPlacement(mark));
   }
   //: the view facing the robot at ``basePose``, brought closer where something stands
   //: in its way; null when it would come too close to the robot
@@ -1419,6 +1437,7 @@ Panels.define('robot-scene', function (root, bus) {
     fetch(liveUrl() + '/state').then(function (r) { return r.json(); })
       .then(function (st) {
         liveFails = 0;
+        showCalibrationMark(st.calibrationMark);
         if (st.sequenceNumber !== lastSeq) { lastSeq = st.sequenceNumber; applyLive(st); }
       })
       .catch(function () { if (++liveFails > 30) setLive(false); });
@@ -1534,6 +1553,7 @@ Panels.define('robot-scene', function (root, bus) {
     } else if (liveTimer) {
       clearInterval(liveTimer);
       liveTimer = null;
+      showCalibrationMark(null);
       // remove objects that only existed for the live world, restore the rest
       clearMarkers();
       for (const key in liveSpawned) removeObject(key);
@@ -1615,6 +1635,7 @@ Panels.define('robot-scene', function (root, bus) {
     if (ssaoPass) ssaoPass.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     needsRender = true;
+    reportShownCamera();
   }
   window.addEventListener('resize', resize);
   const containerObserver = new ResizeObserver(resize);
