@@ -25,6 +25,7 @@ from semantic_digital_twin.spatial_types import (
     HomogeneousTransformationMatrix,
 )
 from cramera.logging_setup import get_logger
+from cramera.camera import CalibrationMark, ShownCamera
 from cramera.config import CrameraConfig
 from cramera.body_geometry import NumericPose, POSE_PRECISION, rounded_pose
 from semantic_digital_twin.world_description.connections import (
@@ -492,6 +493,18 @@ class Bridge:
     _lock: threading.Lock = field(default_factory=threading.Lock)
     """
     Guards every snapshot dict that the HTTP layer reads.
+    """
+
+    shown_cameras: list[ShownCamera] = field(default_factory=list)
+    """
+    The cameras the viewer reported showing the scene through, in the order it
+    started showing them.
+    """
+
+    calibration_mark: CalibrationMark | None = None
+    """
+    The mark the viewer draws over the scene for a person to point at; None draws
+    none.
     """
 
     bundle_lock: threading.RLock = field(default_factory=threading.RLock)
@@ -1310,12 +1323,46 @@ class Bridge:
 
     def get_state(self) -> dict[str, Any]:
         """
-        The newest world snapshot (safe to call from HTTP threads).
-
+        The newest world snapshot, with the calibration mark to draw over it while one
+        is shown (safe to call from HTTP threads).
         """
         with self._lock:
             payload = self.state.to_payload()
+            mark = self.calibration_mark
+        if mark is not None:
+            payload["calibrationMark"] = asdict(mark)
         return payload
+
+    # %% what the viewer shows
+    def record_shown_camera(self, camera: ShownCamera) -> None:
+        """
+        :param camera: A camera the viewer reports it started to show the scene
+            through.
+        """
+        with self._lock:
+            self.shown_cameras.append(camera)
+            self.shown_cameras.sort(key=lambda shown: shown.shown_at_epoch_ms)
+
+    def shown_camera_at(self, epoch_ms: int) -> ShownCamera | None:
+        """
+        :param epoch_ms: A moment, in epoch milliseconds.
+        :return: The camera the viewer showed the scene through at that moment; None
+            before it reported any.
+        """
+        with self._lock:
+            earlier = [
+                camera
+                for camera in self.shown_cameras
+                if camera.shown_at_epoch_ms <= epoch_ms
+            ]
+        return earlier[-1] if earlier else None
+
+    def show_calibration_mark(self, mark: CalibrationMark | None) -> None:
+        """
+        :param mark: The mark the viewer is to draw over the scene; None hides it.
+        """
+        with self._lock:
+            self.calibration_mark = mark
 
     def get_transforms(self) -> dict[str, Any]:
         """

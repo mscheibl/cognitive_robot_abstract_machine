@@ -705,6 +705,12 @@ body.graph-full-open{overflow:hidden}
 :root.automatic-camera .pop-out,
 :root.automatic-camera .viewer-status,
 :root.automatic-camera .workflow{display:none}
+/* a mark over the scene for a person to point at while pointing is calibrated */
+.calibration-mark{position:absolute;display:none;width:36px;height:36px;margin:-18px 0 0 -18px;
+  border:4px solid #ff3b30;border-radius:50%;box-shadow:0 0 0 3px rgba(255,255,255,.85);
+  pointer-events:none;z-index:2}
+.calibration-mark::after{content:"";position:absolute;left:50%;top:50%;width:8px;height:8px;
+  margin:-4px 0 0 -4px;border-radius:50%;background:#ff3b30}
 
 /* shared busy indicator: a spinner + elapsed time, used while a live scene comes up */
 @keyframes cr-spin { to { transform: rotate(360deg); } }
