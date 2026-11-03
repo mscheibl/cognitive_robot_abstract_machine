@@ -42,6 +42,7 @@ from ..dataset.classes_with_generic import (
     ExampleClass,
     ComplexCombinedThreeGenericSubClassSafeWithThirdTypes,
 )
+from ..dataset.metaclass_with_annotations import GenericItemHolder
 
 
 from dataclasses import dataclass
@@ -899,3 +900,23 @@ def test_a_subclass_compared_by_identity_is_hashable():
     instance = CombinedClass()
 
     assert instance in {instance}
+
+
+# %% classes whose metaclass carries annotations of its own
+
+
+def test_a_bound_field_is_narrowed_when_the_metaclass_carries_annotations():
+    @dataclass(eq=False)
+    class IntegerItemHolder(GenericItemHolder[int]): ...
+
+    items_field = next(f for f in fields(IntegerItemHolder) if f.name == "items")
+    assert items_field.type == list[int]
+
+
+def test_binding_a_parameter_leaves_the_base_annotations_unchanged():
+    annotations_before = dict(vars(GenericItemHolder)["__annotations__"])
+
+    @dataclass(eq=False)
+    class TextItemHolder(GenericItemHolder[str]): ...
+
+    assert vars(GenericItemHolder)["__annotations__"] == annotations_before
