@@ -891,6 +891,50 @@ Panels.define('robot-scene', function (root, bus) {
     return true;
   }
 
+  // %% automatic camera
+  // With ?camera=automatic the live bridge's automatic camera points the view: its
+  // overview while the robot's base moves, the robot faced from the front once it
+  // rests. The viewer cannot orbit then; the camera glides to each new view.
+  //: share of the remaining way the camera glides towards its view per frame
+  const AUTOMATIC_CAMERA_GLIDE = 0.05;
+  //: how close, in metres, the camera has to come to its view to stop gliding
+  const AUTOMATIC_CAMERA_ARRIVAL = 0.001;
+  let automaticCamera = null;    // {settings, views} once the bridge sent one
+  let automaticView = null;      // {position, target} the camera glides to, three y-up
+  function worldPoint(zUp) {
+    worldRoot.updateWorldMatrix(true, false);
+    return worldRoot.localToWorld(new THREE.Vector3(zUp[0], zUp[1], zUp[2]));
+  }
+  function loadAutomaticCamera() {
+    if (!SceneContext.automaticCamera()) return;
+    fetch(liveUrl() + '/camera').then(function (r) { return r.json(); })
+      .then(function (answer) {
+        if (!answer.camera) return;
+        automaticCamera = { settings: answer.camera, views: AutomaticCamera.create(answer.camera) };
+        controls.enableRotate = false;
+        controls.enablePan = false;
+        controls.enableZoom = false;
+      })
+      .catch(function () {});
+  }
+  function aimAutomaticCamera(basePose) {
+    const settings = automaticCamera.settings;
+    const shown = automaticCamera.views.observe(basePose, performance.now() / 1000);
+    const view = shown === AutomaticCamera.ROBOT_FACING
+      ? RobotFacingView.of(basePose, settings.robot_facing)
+      : settings.overview;
+    automaticView = { position: worldPoint(view.position), target: worldPoint(view.target) };
+  }
+  //: glide one frame towards the automatic camera's view; whether the camera moved
+  function glideAutomaticCamera() {
+    if (!automaticView) return false;
+    if (camera.position.distanceTo(automaticView.position) < AUTOMATIC_CAMERA_ARRIVAL
+      && controls.target.distanceTo(automaticView.target) < AUTOMATIC_CAMERA_ARRIVAL) return false;
+    camera.position.lerp(automaticView.position, AUTOMATIC_CAMERA_GLIDE);
+    controls.target.lerp(automaticView.target, AUTOMATIC_CAMERA_GLIDE);
+    return true;
+  }
+
   // %% place-target marker (blue corner brackets)
   const marker = new THREE.Group();
   let PLACE0 = null;
@@ -1345,7 +1389,8 @@ Panels.define('robot-scene', function (root, bus) {
       } else unknown = true;                   // an object the demo spawned mid-run
     }
     if (unknown) syncLiveObjects();            // fetch the catalog & spawn the newcomers
-    if (follow && robotCenter(_target)) controls.target.lerp(_target, 0.08);
+    if (automaticCamera && st.base) aimAutomaticCamera(st.base);
+    else if (follow && robotCenter(_target)) controls.target.lerp(_target, 0.08);
     needsRender = true;
   }
   let livePolls = 0;
@@ -1464,6 +1509,7 @@ Panels.define('robot-scene', function (root, bus) {
       applyMarkerTopicOverrides();
       verifyLiveBundle();
       syncLiveObjects();
+      loadAutomaticCamera();
       liveTimer = setInterval(livePoll, 66);          // ~15 Hz render updates
     } else if (liveTimer) {
       clearInterval(liveTimer);
@@ -1526,6 +1572,7 @@ Panels.define('robot-scene', function (root, bus) {
       });
       needsRender = true;
     }
+    if (liveOn && glideAutomaticCamera()) needsRender = true;
     const moved = controls.update();
     if (playing && traj && !liveOn) {
       playhead += (traj.framesPerSecond || 30) * elapsedSeconds * playbackSpeedMultiplier;

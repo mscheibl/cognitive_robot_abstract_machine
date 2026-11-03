@@ -126,3 +126,13 @@ test('the pop-out url without an active scene lets the viewer pick its default',
   loadWithSearch('');
   assert.strictEqual(window.SceneContext.popOutUrl(), 'index.html?layout=scene');
 });
+
+test('automaticCamera() is off without a ?camera= param', function () {
+  loadWithSearch('?layout=scene');
+  assert.strictEqual(window.SceneContext.automaticCamera(), false);
+});
+
+test('automaticCamera() reads ?camera=automatic alongside other params', function () {
+  loadWithSearch('?layout=scene&camera=automatic');
+  assert.strictEqual(window.SceneContext.automaticCamera(), true);
+});
