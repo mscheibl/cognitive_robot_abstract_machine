@@ -250,6 +250,7 @@ Panels.define('robot-scene', function (root, bus) {
       roughness: 0.5, metalness: 0.05, envMapIntensity: 0.7,
     });
     function place(content) {                  // content: Mesh or Object3D
+      stripImportedLights(content);
       content.traverse(function (c) {
         if (c.isMesh) {
           c.castShadow = true; c.receiveShadow = true;
@@ -311,6 +312,7 @@ Panels.define('robot-scene', function (root, bus) {
         needsRender = true;
       };
       const finish = function (content3d) {
+        stripImportedLights(content3d);
         content3d.scale.set(shapeSpec.scale[0], shapeSpec.scale[1], shapeSpec.scale[2]);
         holder.add(content3d);
         needsRender = true;
@@ -689,11 +691,11 @@ Panels.define('robot-scene', function (root, bus) {
     }
     mat.needsUpdate = true;
   }
-  const OWN_LIGHTS = new Set();
-  scene3.traverse(function (c) { if (c.isLight) OWN_LIGHTS.add(c); });
+  // a loaded mesh file may carry the lights it was modelled under, sometimes far
+  // brighter than 1; the panel's own lights never sit inside a loaded file
   function stripImportedLights(root) {
     const kill = [];
-    root.traverse(function (c) { if (c.isLight && !OWN_LIGHTS.has(c)) kill.push(c); });
+    root.traverse(function (c) { if (c.isLight) kill.push(c); });
     kill.forEach(function (l) { if (l.parent) l.parent.remove(l); });
   }
   function tameModel(entry) {
