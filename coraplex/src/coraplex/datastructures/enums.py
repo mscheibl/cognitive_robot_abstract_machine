@@ -7,6 +7,8 @@ from __future__ import annotations
 from enum import Enum, auto, StrEnum
 from typing_extensions import TYPE_CHECKING
 
+from giskardpy.executor import NoPacing, Pacer, RealTimePacer
+
 if TYPE_CHECKING:
     from coraplex.plans.plan import Plan
     from coraplex.plans.plan_node import PlanNode
@@ -97,6 +99,32 @@ class FindBodyInRegionMethod(Enum):
     The MultiRay method is used to find the body in a region by casting multiple rays
     covering the region.
     """
+
+
+class MotionPacing(Enum):
+    """
+    How fast the motions of a kinematically simulated robot run.
+    """
+
+    AS_FAST_AS_POSSIBLE = auto()
+    """
+    Every control cycle follows the previous one at once, so a motion ends as soon as it
+    is computed.
+    """
+
+    REAL_TIME = auto()
+    """
+    Every control cycle takes as long on the wall clock as it does in the controller, so
+    a watched robot moves at the speed it would really move at.
+    """
+
+    def pacer(self) -> Pacer:
+        """
+        :return: A fresh pacer that holds a motion's control loop at this pace.
+        """
+        if self is MotionPacing.REAL_TIME:
+            return RealTimePacer()
+        return NoPacing()
 
 
 class ExecutionType(Enum):

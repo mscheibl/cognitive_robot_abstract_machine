@@ -36,7 +36,7 @@ from giskardpy.motion_statechart.motion_statechart import (
     MotionStatechart,
     StateHistoryObserver,
 )
-from giskardpy.executor import Executor, NoPacing, Pacer, SteppedSimulationPacer
+from giskardpy.executor import Executor, Pacer, SteppedSimulationPacer
 from giskardpy.qp.qp_controller_config import QPControllerConfig
 from giskardpy.ros_executor import Ros2Executor
 from krrood.entity_query_language.factories import evaluate_condition
@@ -403,7 +403,9 @@ class GiskardExecutable(Executable):
         """
         Compiles the motion state chart and ticks it in the world of the context until
         it is done or gives up, stepping the physics one control period between two
-        ticks where a simulation is being performed in.
+        ticks where a simulation is being performed in, and otherwise holding the ticks
+        at the context's
+        :attr:`~coraplex.datastructures.dataclasses.Context.motion_pacing`.
 
         The chart's own stall monitor decides when a motion is hopeless, so a motion
         that keeps converging is never cut off for taking many ticks.
@@ -421,7 +423,7 @@ class GiskardExecutable(Executable):
             qp_controller_config = (
                 QPControllerConfig.create_with_fast_simulation_defaults()
             )
-            pacer = NoPacing()
+            pacer = self.context.motion_pacing.pacer()
         else:
             qp_controller_config = (
                 QPControllerConfig.create_with_physical_simulation_defaults()
