@@ -426,7 +426,7 @@ class GiskardExecutable(Executable):
             qp_controller_config = (
                 QPControllerConfig.create_with_fast_simulation_defaults()
             )
-            pacer = self.context.motion_pacing.pacer()
+            pacer = self.context.motion_pacing.pacer(self.context.real_time_factor)
         else:
             qp_controller_config = (
                 QPControllerConfig.create_with_physical_simulation_defaults()
