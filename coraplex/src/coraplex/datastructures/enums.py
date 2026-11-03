@@ -7,7 +7,7 @@ from __future__ import annotations
 from enum import Enum, auto, StrEnum
 from typing_extensions import TYPE_CHECKING
 
-from giskardpy.executor import NoPacing, Pacer, RealTimePacer
+from giskardpy.executor import NoPacing, Pacer, SimulationPacer
 
 if TYPE_CHECKING:
     from coraplex.plans.plan import Plan
@@ -114,16 +114,19 @@ class MotionPacing(Enum):
 
     REAL_TIME = auto()
     """
-    Every control cycle takes as long on the wall clock as it does in the controller, so
-    a watched robot moves at the speed it would really move at.
+    Every control cycle takes as long on the wall clock as it does in the controller,
+    divided by a real-time factor, so a watched robot moves at the speed it would really
+    move at, or that many times faster.
     """
 
-    def pacer(self) -> Pacer:
+    def pacer(self, real_time_factor: float = 1.0) -> Pacer:
         """
+        :param real_time_factor: How many times faster than real time a motion paced in
+            real time runs.
         :return: A fresh pacer that holds a motion's control loop at this pace.
         """
         if self is MotionPacing.REAL_TIME:
-            return RealTimePacer()
+            return SimulationPacer(real_time_factor=real_time_factor)
         return NoPacing()
 
 

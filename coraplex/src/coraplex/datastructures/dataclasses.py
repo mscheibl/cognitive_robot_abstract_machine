@@ -133,6 +133,12 @@ class Context(PlanEntity):
     How fast the motions of this plan run when the robot is kinematically simulated.
     """
 
+    real_time_factor: float = field(default=1.0, kw_only=True)
+    """
+    How many times faster than real time the motions of this plan run when
+    :attr:`motion_pacing` paces them in real time.
+    """
+
     def __post_init__(self):
         self.debug = self._debug
 

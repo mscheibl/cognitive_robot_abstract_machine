@@ -10,22 +10,27 @@ from coraplex.execution_environment import kinematically_simulated_robot
 from coraplex.plans.factories import sequential
 from coraplex.plans.underspecified import ActionTrial
 from coraplex.robot_plans.actions.core.robot_body import MoveTorsoAction
-from giskardpy.executor import RealTimePacer
+from giskardpy.executor import ScheduledPacer
 from semantic_digital_twin.datastructures.definitions import TorsoState
 
 
-# %% real-time pacer observation
+# %% scheduled pacer observation
 
 
 @dataclass
-class RealTimePacerObservation:
+class ScheduledPacerObservation:
     """
-    The waits of every :class:`~giskardpy.executor.RealTimePacer` while it is observed.
+    The waits of every :class:`~giskardpy.executor.ScheduledPacer` while it is observed.
     """
 
     cycle_durations: list[float] = field(default_factory=list)
     """
     The cycle duration of each wait, in seconds.
+    """
+
+    control_periods: list[float] = field(default_factory=list)
+    """
+    The control period of the loop at each wait, in seconds.
     """
 
     @property
@@ -37,18 +42,20 @@ class RealTimePacerObservation:
 
 
 @pytest.fixture
-def real_time_pacer_observation(monkeypatch) -> RealTimePacerObservation:
+def real_time_pacer_observation(monkeypatch) -> ScheduledPacerObservation:
     """
-    Record every wait of a real-time pacer, which then still waits as it would.
+    Record every wait of a pacer that holds a loop to the wall clock, which then still
+    waits as it would.
     """
-    observation = RealTimePacerObservation()
-    original_sleep = RealTimePacer.sleep
+    observation = ScheduledPacerObservation()
+    original_sleep = ScheduledPacer.sleep
 
-    def observed_sleep(pacer: RealTimePacer) -> None:
+    def observed_sleep(pacer: ScheduledPacer) -> None:
         observation.cycle_durations.append(pacer.cycle_duration)
+        observation.control_periods.append(1 / pacer.target_frequency)
         original_sleep(pacer)
 
-    monkeypatch.setattr(RealTimePacer, "sleep", observed_sleep)
+    monkeypatch.setattr(ScheduledPacer, "sleep", observed_sleep)
     return observation
 
 
@@ -106,3 +113,34 @@ def test_a_trial_runs_unpaced_even_for_a_context_paced_in_real_time(
     trial.discard()
     assert succeeded
     assert real_time_pacer_observation.cycle_durations == []
+
+
+# %% motions paced faster than real time
+
+
+def test_a_motion_paced_in_real_time_waits_one_control_period_per_cycle_by_default(
+    pr2_apartment_context, real_time_pacer_observation
+):
+    _, _, context = pr2_apartment_context
+    context.motion_pacing = MotionPacing.REAL_TIME
+
+    _raise_torso(context)
+
+    assert real_time_pacer_observation.cycle_durations == pytest.approx(
+        real_time_pacer_observation.control_periods
+    )
+
+
+def test_a_motion_paced_twice_as_fast_as_real_time_waits_half_a_control_period(
+    pr2_apartment_context, real_time_pacer_observation
+):
+    _, _, context = pr2_apartment_context
+    context.motion_pacing = MotionPacing.REAL_TIME
+    context.real_time_factor = 2.0
+
+    _raise_torso(context)
+
+    assert real_time_pacer_observation.cycle_durations
+    assert real_time_pacer_observation.cycle_durations == pytest.approx(
+        [period / 2.0 for period in real_time_pacer_observation.control_periods]
+    )
