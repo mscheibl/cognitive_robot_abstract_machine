@@ -42,8 +42,9 @@ Each bridge gets its own configuration by default.
 For an audience watching the robot, `CrameraConfig(automatic_camera=...)` takes a
 `cramera.camera.AutomaticCamera`, and the viewer opened with
 `?layout=scene&camera=automatic` points its camera on its own: a fixed overview while
-the robot's base moves, and a view facing the robot from the front once the base rests.
-The viewer cannot orbit in that mode.
+the robot's base moves, and a view facing the robot from the front once the base rests,
+brought closer where a wall or furniture stands in its way. The camera cuts between the
+views, and the viewer's controls are hidden in that mode.
 
 The scene supports orbit, pan, zoom, robot following and click-to-inspect. The graph
 panel displays the plan, statecharts, robot kinematics and transforms. EQL results

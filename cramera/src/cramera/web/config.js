@@ -17,6 +17,10 @@ if (_sceneOnly) {
 if (SceneContext.poppedOut()) {
   document.documentElement.classList.add(SceneContext.POPPED_OUT_CLASS);
 }
+// an audience watching the robot sees the scene alone, without the viewer's controls
+if (SceneContext.automaticCamera()) {
+  document.documentElement.classList.add(SceneContext.AUTOMATIC_CAMERA_CLASS);
+}
 window.CRAMERA_CONFIG = {
   layout: _sceneOnly
     ? { left: ['robot-scene'] }

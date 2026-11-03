@@ -696,6 +696,15 @@ body.graph-full-open{overflow:hidden}
 :root.scene-only .split{position:absolute;inset:0}
 /* the window the scene was popped out into has nothing left to pop out; embeds keep it */
 :root.popped-out .pop-out{display:none}
+/* an audience watching the robot through the automatic camera sees the scene alone */
+:root.automatic-camera .panel-head,
+:root.automatic-camera .layers-panel,
+:root.automatic-camera .live-indicator,
+:root.automatic-camera .step-caption,
+:root.automatic-camera .stage-hint,
+:root.automatic-camera .pop-out,
+:root.automatic-camera .viewer-status,
+:root.automatic-camera .workflow{display:none}
 
 /* shared busy indicator: a spinner + elapsed time, used while a live scene comes up */
 @keyframes cr-spin { to { transform: rotate(360deg); } }

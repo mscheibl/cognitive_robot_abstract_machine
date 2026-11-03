@@ -30,16 +30,17 @@ class Viewpoint:
 @dataclass(frozen=True)
 class RobotFacingCamera:
     """
-    A camera in front of the robot that faces it, as a person across a table would.
+    A camera in front of the robot that faces it, as a person across a table would, and
+    comes closer where something stands in its way.
     """
 
-    distance: float = 1.8
+    distance: float = 2.5
     """
     How far in front of the robot root the camera stands, along the robot's forward
     axis, in metres.
     """
 
-    height: float = 1.5
+    height: float = 1.6
     """
     How high above the robot root the camera stands, in metres.
     """
@@ -47,6 +48,18 @@ class RobotFacingCamera:
     target_height: float = 1.0
     """
     How high above the robot root the point lies that the camera looks at, in metres.
+    """
+
+    obstacle_clearance: float = 0.2
+    """
+    How far the camera stays from a wall or furniture that stands between it and the
+    robot, in metres; the camera comes closer to the robot instead.
+    """
+
+    minimum_distance: float = 1.0
+    """
+    How close to the point it looks at the camera may come before the overview is shown
+    instead, in metres.
     """
 
 

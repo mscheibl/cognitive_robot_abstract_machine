@@ -19,6 +19,8 @@
   const LAYOUT_SCENE = 'scene';
   //: class on the root element while the 3D scene is shown alone; app.css styles it
   const SCENE_ONLY_CLASS = 'scene-only';
+  //: class on the root element while the automatic camera shows the scene to an audience
+  const AUTOMATIC_CAMERA_CLASS = 'automatic-camera';
   //: class on the root element of the window the scene was popped out into
   const POPPED_OUT_CLASS = 'popped-out';
   const LAYOUT_SCENE_PATTERN = new RegExp('[?&]layout=' + LAYOUT_SCENE + '(&|$)');
@@ -64,6 +66,7 @@
   window.SceneContext = {
     LAYOUT_SCENE: LAYOUT_SCENE,
     CAMERA_AUTOMATIC: CAMERA_AUTOMATIC,
+    AUTOMATIC_CAMERA_CLASS: AUTOMATIC_CAMERA_CLASS,
     SCENE_ONLY_CLASS: SCENE_ONLY_CLASS,
     POPPED_OUT_CLASS: POPPED_OUT_CLASS,
     name: name,

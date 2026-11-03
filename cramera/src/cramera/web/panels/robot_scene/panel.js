@@ -894,13 +894,11 @@ Panels.define('robot-scene', function (root, bus) {
   // %% automatic camera
   // With ?camera=automatic the live bridge's automatic camera points the view: its
   // overview while the robot's base moves, the robot faced from the front once it
-  // rests. The viewer cannot orbit then; the camera glides to each new view.
-  //: share of the remaining way the camera glides towards its view per frame
-  const AUTOMATIC_CAMERA_GLIDE = 0.05;
-  //: how close, in metres, the camera has to come to its view to stop gliding
-  const AUTOMATIC_CAMERA_ARRIVAL = 0.001;
+  // rests. The viewer cannot orbit then, and the camera cuts from view to view rather
+  // than flying through the scene.
   let automaticCamera = null;    // {settings, views} once the bridge sent one
-  let automaticView = null;      // {position, target} the camera glides to, three y-up
+  let automaticCameraShot = null;  // what the camera was last aimed for: view and base pose
+  const obstacleRay = new THREE.Raycaster();
   function worldPoint(zUp) {
     worldRoot.updateWorldMatrix(true, false);
     return worldRoot.localToWorld(new THREE.Vector3(zUp[0], zUp[1], zUp[2]));
@@ -920,18 +918,40 @@ Panels.define('robot-scene', function (root, bus) {
   function aimAutomaticCamera(basePose) {
     const settings = automaticCamera.settings;
     const shown = automaticCamera.views.observe(basePose, performance.now() / 1000);
-    const view = shown === AutomaticCamera.ROBOT_FACING
-      ? RobotFacingView.of(basePose, settings.robot_facing)
-      : settings.overview;
-    automaticView = { position: worldPoint(view.position), target: worldPoint(view.target) };
+    const shot = shown + ' ' + basePose.join(' ');
+    if (shot === automaticCameraShot) return;
+    automaticCameraShot = shot;
+    const facing = shown === AutomaticCamera.ROBOT_FACING
+      ? unobstructedRobotFacingView(basePose, settings.robot_facing)
+      : null;
+    const view = facing || settings.overview;
+    camera.position.copy(worldPoint(view.position));
+    controls.target.copy(worldPoint(view.target));
+    needsRender = true;
   }
-  //: glide one frame towards the automatic camera's view; whether the camera moved
-  function glideAutomaticCamera() {
-    if (!automaticView) return false;
-    if (camera.position.distanceTo(automaticView.position) < AUTOMATIC_CAMERA_ARRIVAL
-      && controls.target.distanceTo(automaticView.target) < AUTOMATIC_CAMERA_ARRIVAL) return false;
-    camera.position.lerp(automaticView.position, AUTOMATIC_CAMERA_GLIDE);
-    controls.target.lerp(automaticView.target, AUTOMATIC_CAMERA_GLIDE);
+  //: the view facing the robot at ``basePose``, brought closer where something stands
+  //: in its way; null when it would come too close to the robot
+  function unobstructedRobotFacingView(basePose, settings) {
+    const view = RobotFacingView.of(basePose, settings);
+    return RobotFacingView.clearOf(view, freeDistance(view), settings);
+  }
+  //: how far from the point a view looks at the first thing besides the robot stands,
+  //: towards the view's camera; Infinity when nothing does
+  function freeDistance(view) {
+    const from = worldPoint(view.target);
+    const direction = worldPoint(view.position).sub(from).normalize();
+    obstacleRay.set(from, direction);
+    obstacleRay.camera = camera;
+    const hit = obstacleRay.intersectObject(worldRoot, true).find(function (candidate) {
+      return isShownOutsideRobot(candidate.object);
+    });
+    return hit ? hit.distance : Infinity;
+  }
+  //: whether ``object`` is drawn and belongs to neither the robot nor the debug markers
+  function isShownOutsideRobot(object) {
+    for (let node = object; node; node = node.parent) {
+      if (!node.visible || node === robotModel.obj || node === markerRoot) return false;
+    }
     return true;
   }
 
@@ -1389,7 +1409,7 @@ Panels.define('robot-scene', function (root, bus) {
       } else unknown = true;                   // an object the demo spawned mid-run
     }
     if (unknown) syncLiveObjects();            // fetch the catalog & spawn the newcomers
-    if (automaticCamera && st.base) aimAutomaticCamera(st.base);
+    if (automaticCamera && robotModel && st.base) aimAutomaticCamera(st.base);
     else if (follow && robotCenter(_target)) controls.target.lerp(_target, 0.08);
     needsRender = true;
   }
@@ -1572,7 +1592,6 @@ Panels.define('robot-scene', function (root, bus) {
       });
       needsRender = true;
     }
-    if (liveOn && glideAutomaticCamera()) needsRender = true;
     const moved = controls.update();
     if (playing && traj && !liveOn) {
       playhead += (traj.framesPerSecond || 30) * elapsedSeconds * playbackSpeedMultiplier;
