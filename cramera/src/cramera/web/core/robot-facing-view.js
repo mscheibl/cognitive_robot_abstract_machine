@@ -4,7 +4,8 @@
  *
  * Poses are the bridge's [x, y, z, qx, qy, qz, qw] in the z-up world frame, and the
  * robot's forward axis is the x axis of its root. Only the heading about the vertical
- * counts, so a tilted root does not tilt the view.
+ * counts, so a tilted root does not tilt the view. Where a wall or furniture stands
+ * between the robot and that place, the camera comes closer instead.
  *
  * Pure geometry, no DOM and no three.js, so it is testable under node.
  * ==========================================================================*/
@@ -35,7 +36,25 @@
     };
   }
 
+  /* ``view`` with its camera pulled towards the point it looks at until it stays the
+   * obstacle clearance short of an obstacle ``freeDistance`` away from that point;
+   * null when that leaves the camera closer than the minimum distance. ``settings``
+   * holds obstacle_clearance and minimum_distance in metres. */
+  function clearOf(view, freeDistance, settings) {
+    const offset = view.position.map(function (value, index) { return value - view.target[index]; });
+    const reach = Math.hypot(offset[0], offset[1], offset[2]);
+    const allowed = freeDistance - settings.obstacle_clearance;
+    if (allowed >= reach) return view;
+    if (allowed < settings.minimum_distance) return null;
+    const share = allowed / reach;
+    return {
+      position: view.target.map(function (value, index) { return value + share * offset[index]; }),
+      target: view.target,
+    };
+  }
+
   global.RobotFacingView = {
     of: of,
+    clearOf: clearOf,
   };
 })(window);
