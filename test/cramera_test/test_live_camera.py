@@ -5,11 +5,13 @@ The live bridge tells the viewer how to point its camera automatically.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict
 
+import numpy as np
 import pytest
 
-from cramera.camera import AutomaticCamera, CalibrationMark, ShownCamera, Viewpoint
+from cramera.camera import AutomaticCamera, ScenePosition, ShownCamera, Viewpoint
 from cramera.config import CrameraConfig
 from cramera.live.bridge import Bridge
 from cramera.live.http import serve
@@ -129,7 +131,7 @@ def served_state(bridge: Bridge) -> dict:
 
 def test_the_calibration_mark_shown_is_served_with_the_state() -> None:
     bridge = Bridge()
-    mark = CalibrationMark(horizontal=0.25, vertical=0.75)
+    mark = ScenePosition(horizontal=0.25, vertical=0.75)
 
     bridge.show_calibration_mark(mark)
 
@@ -138,8 +140,50 @@ def test_the_calibration_mark_shown_is_served_with_the_state() -> None:
 
 def test_no_calibration_mark_is_served_once_it_is_hidden() -> None:
     bridge = Bridge()
-    bridge.show_calibration_mark(CalibrationMark(horizontal=0.5, vertical=0.5))
+    bridge.show_calibration_mark(ScenePosition(horizontal=0.5, vertical=0.5))
 
     bridge.show_calibration_mark(None)
 
     assert "calibrationMark" not in served_state(bridge)
+
+
+# %% rays through the shown scene
+
+
+def forward_of(camera: ShownCamera) -> np.ndarray:
+    """
+    :param camera: A shown camera.
+    :return: The unit vector it looks along.
+    """
+    looking = np.subtract(camera.viewpoint.target, camera.viewpoint.position)
+    return looking / np.linalg.norm(looking)
+
+
+def test_the_ray_through_the_centre_of_the_scene_is_the_line_of_sight() -> None:
+    camera = shown_camera(1000, 1.0)
+
+    ray = camera.ray_through(ScenePosition(horizontal=0.5, vertical=0.5))
+
+    assert np.allclose(ray.origin, camera.viewpoint.position)
+    assert np.allclose(ray.direction, forward_of(camera))
+
+
+def test_the_ray_through_the_right_edge_turns_by_half_the_horizontal_view() -> None:
+    camera = shown_camera(1000, 1.0)
+    half_height = math.tan(math.radians(camera.vertical_field_of_view) / 2)
+
+    ray = camera.ray_through(ScenePosition(horizontal=1.0, vertical=0.5))
+
+    turned = math.acos(float(np.dot(ray.direction, forward_of(camera))))
+    assert turned == pytest.approx(math.atan(half_height * camera.aspect_ratio))
+    assert np.cross(forward_of(camera), ray.direction)[2] < 0
+
+
+def test_the_ray_through_the_top_edge_rises_by_half_the_vertical_view() -> None:
+    camera = shown_camera(1000, 1.0)
+
+    ray = camera.ray_through(ScenePosition(horizontal=0.5, vertical=0.0))
+
+    risen = math.acos(float(np.dot(ray.direction, forward_of(camera))))
+    assert risen == pytest.approx(math.radians(camera.vertical_field_of_view) / 2)
+    assert ray.direction[2] > forward_of(camera)[2]

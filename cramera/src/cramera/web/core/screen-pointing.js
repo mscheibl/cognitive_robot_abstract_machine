@@ -5,7 +5,7 @@
  *
  * Views are the bridge's :class:`cramera.camera.Viewpoint` fields; a report is what
  * :class:`cramera.camera.ShownCamera` reads; marks are
- * :class:`cramera.camera.CalibrationMark` fields.
+ * :class:`cramera.camera.ScenePosition` fields.
  *
  * Pure functions, no DOM and no three.js, so it is testable under node.
  * ==========================================================================*/

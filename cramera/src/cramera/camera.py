@@ -4,9 +4,11 @@ How the viewer points its camera on its own, for an audience watching the robot.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from numbers import Real
 
+import numpy as np
 from typing_extensions import Any
 
 
@@ -118,6 +120,23 @@ def _is_point(value: Any) -> bool:
 
 
 @dataclass(frozen=True)
+class Ray:
+    """
+    A half-line in the world.
+    """
+
+    origin: np.ndarray
+    """
+    Where the ray starts, in world coordinates in metres.
+    """
+
+    direction: np.ndarray
+    """
+    The unit vector the ray runs along, in world coordinates.
+    """
+
+
+@dataclass(frozen=True)
 class ShownCamera:
     """
     The camera the viewer started to show the scene through at a moment.
@@ -174,19 +193,39 @@ class ShownCamera:
             shown_at_epoch_ms=int(shown_at_epoch_ms),
         )
 
+    def ray_through(self, position: ScenePosition) -> Ray:
+        """
+        :param position: A position on the scene as this camera shows it.
+        :return: The ray from the camera through what is shown at that position, with
+            the world's z axis up on the screen.
+        """
+        origin = np.array(self.viewpoint.position, dtype=float)
+        forward = np.array(self.viewpoint.target, dtype=float) - origin
+        forward /= np.linalg.norm(forward)
+        right = np.cross(forward, [0.0, 0.0, 1.0])
+        right /= np.linalg.norm(right)
+        up = np.cross(right, forward)
+        half_height = math.tan(math.radians(self.vertical_field_of_view) / 2)
+        across = (2 * position.horizontal - 1) * half_height * self.aspect_ratio
+        upward = (1 - 2 * position.vertical) * half_height
+        direction = forward + across * right + upward * up
+        return Ray(origin=origin, direction=direction / np.linalg.norm(direction))
+
 
 @dataclass(frozen=True)
-class CalibrationMark:
+class ScenePosition:
     """
-    A mark the viewer draws over the shown scene for a person to point at.
+    A position on the scene as the viewer shows it, independent of the screen's size.
     """
 
     horizontal: float
     """
-    Where the mark lies across the shown scene, from 0 at its left to 1 at its right.
+    How far across the shown scene the position lies, from 0 at its left to 1 at its
+    right.
     """
 
     vertical: float
     """
-    Where the mark lies down the shown scene, from 0 at its top to 1 at its bottom.
+    How far down the shown scene the position lies, from 0 at its top to 1 at its
+    bottom.
     """
