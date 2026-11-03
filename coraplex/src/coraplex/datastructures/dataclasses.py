@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from typing_extensions import TYPE_CHECKING, TypeVar
 
+from coraplex.datastructures.enums import MotionPacing
 from coraplex.plans.plan_entity import PlanEntity
 from krrood.entity_query_language.backends import (
     QueryBackend,
@@ -123,6 +124,13 @@ class Context(PlanEntity):
     """
     Default goal-achievement tolerances motions fall back to when they leave their own
     thresholds unset.
+    """
+
+    motion_pacing: MotionPacing = field(
+        default=MotionPacing.AS_FAST_AS_POSSIBLE, kw_only=True
+    )
+    """
+    How fast the motions of this plan run when the robot is kinematically simulated.
     """
 
     def __post_init__(self):
