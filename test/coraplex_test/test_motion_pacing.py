@@ -8,6 +8,7 @@ import pytest
 from coraplex.datastructures.enums import MotionPacing
 from coraplex.execution_environment import kinematically_simulated_robot
 from coraplex.plans.factories import sequential
+from coraplex.plans.underspecified import ActionTrial
 from coraplex.robot_plans.actions.core.robot_body import MoveTorsoAction
 from giskardpy.executor import RealTimePacer
 from semantic_digital_twin.datastructures.definitions import TorsoState
@@ -90,4 +91,18 @@ def test_a_motion_runs_unpaced_by_default(
 
     _raise_torso(context)
 
+    assert real_time_pacer_observation.cycle_durations == []
+
+
+def test_a_trial_runs_unpaced_even_for_a_context_paced_in_real_time(
+    pr2_apartment_context, real_time_pacer_observation
+):
+    _, _, context = pr2_apartment_context
+    context.motion_pacing = MotionPacing.REAL_TIME
+    trial = ActionTrial(context=context)
+
+    succeeded = trial.succeeds(MoveTorsoAction(TorsoState.HIGH))
+
+    trial.discard()
+    assert succeeded
     assert real_time_pacer_observation.cycle_durations == []

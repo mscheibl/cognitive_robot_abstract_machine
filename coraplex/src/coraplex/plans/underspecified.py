@@ -4,7 +4,11 @@ from copy import deepcopy
 from dataclasses import dataclass, field, fields, replace
 from typing_extensions import TYPE_CHECKING, Iterator
 
-from coraplex.datastructures.enums import ActionTrialVisualization, ExecutionType
+from coraplex.datastructures.enums import (
+    ActionTrialVisualization,
+    ExecutionType,
+    MotionPacing,
+)
 from coraplex.execution_environment import ExecutionEnvironment
 from coraplex.language import SequentialNode
 from coraplex.plans.executables import (
@@ -39,8 +43,9 @@ class ActionTrial:
     the copy was taken are not carried over.
 
     Trials never publish to a synchronizer, always run as
-    :attr:`~coraplex.datastructures.enums.ExecutionType.KINEMATICALLY_SIMULATED`, and always evaluate
-    pre- and postconditions. While the context is debugging, the copy is shown in RViz
+    :attr:`~coraplex.datastructures.enums.ExecutionType.KINEMATICALLY_SIMULATED` and
+    :attr:`~coraplex.datastructures.enums.MotionPacing.AS_FAST_AS_POSSIBLE`, since nobody
+    watches the copy, and always evaluate pre- and postconditions. While the context is debugging, the copy is shown in RViz
     under its own frame prefix and marker topic.
     """
 
@@ -184,6 +189,7 @@ class ActionTrial:
             world=world,
             robot=world.get_semantic_annotation_by_id(self.context.robot.id),
             evaluate_conditions=True,
+            motion_pacing=MotionPacing.AS_FAST_AS_POSSIBLE,
         )
         if self.context.debug:
             self._visualization = RvizVisualization(
