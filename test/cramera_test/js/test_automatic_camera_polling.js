@@ -19,6 +19,7 @@ class UnchangingLiveStream extends ScenePanelFunctions {
     });
     this.aimedAt = [];
     this.scope.applyLive = () => {};
+    this.scope.showCalibrationMark = () => {};
     this.scope.aimAutomaticCamera = basePose => this.aimedAt.push(basePose);
   }
 
