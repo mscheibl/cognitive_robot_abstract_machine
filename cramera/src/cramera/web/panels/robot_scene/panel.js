@@ -909,6 +909,7 @@ Panels.define('robot-scene', function (root, bus) {
       .then(function (answer) {
         if (!answer.camera) return;
         automaticCamera = { settings: answer.camera, views: AutomaticCamera.create(answer.camera) };
+        automaticCameraShot = null;      // the newly attached viewer is told the camera
         controls.enableRotate = false;
         controls.enablePan = false;
         controls.enableZoom = false;
