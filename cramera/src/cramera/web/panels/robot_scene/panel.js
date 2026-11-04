@@ -411,10 +411,7 @@ Panels.define('robot-scene', function (root, bus) {
     if (!g) return;
     arrowOver(key, false);
     worldRoot.remove(g);
-    g.traverse(function (c) {
-      if (c.geometry) c.geometry.dispose();
-      if (c.material) { c.material.map && c.material.map.dispose(); c.material.dispose(); }
-    });
+    disposeGraphics(g);
     delete objectMeshes[key]; delete objectLabels[key];
     delete objectIdByKey[key]; delete liveSpawned[key]; delete objectPending[key];
     refreshFrameAxes();              // its frame goes with it
@@ -1184,11 +1181,19 @@ Panels.define('robot-scene', function (root, bus) {
     while (markerRoot.children.length) {
       const child = markerRoot.children[0];
       markerRoot.remove(child);
-      child.traverse(function (c) {
-        if (c.geometry) c.geometry.dispose();
-        if (c.material) { c.material.map && c.material.map.dispose(); c.material.dispose(); }
-      });
+      disposeGraphics(child);
     }
+  }
+  //: free the geometries, materials and textures of an object and everything below it;
+  //: a mesh holds either one material or a list of them
+  function disposeGraphics(object) {
+    object.traverse(function (c) {
+      if (c.geometry) c.geometry.dispose();
+      [].concat(c.material || []).forEach(function (material) {
+        if (material.map) material.map.dispose();
+        material.dispose();
+      });
+    });
   }
   function markerMaterial(spec) {
     return new THREE.MeshStandardMaterial({
