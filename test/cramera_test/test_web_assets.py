@@ -195,89 +195,22 @@ class TestBinaryGltfLoading:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 class TestJsUnits:
-    def run_node(self, name: str) -> None:
+    @pytest.mark.parametrize(
+        "script", sorted(script.name for script in JS_DIR.glob("test_*.js"))
+    )
+    def test_script(self, script: str) -> None:
         """
-        Run one node test file, failing with its output.
+        Run one node test file of the viewer's scripts, failing with its output.
+
+        :param script: The file's name in the test folder of the viewer's scripts.
         """
         result = subprocess.run(
-            ["node", "--test", str(JS_DIR / name)],
+            ["node", "--test", str(JS_DIR / script)],
             capture_output=True,
             text=True,
             timeout=120,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-
-    def test_bus_and_registry(self):
-        self.run_node("test_bus_registry.js")
-
-    def test_graph_status_rendering(self):
-        self.run_node("test_graph_status.js")
-
-    def test_graph_panel(self):
-        self.run_node("test_graph_panel.js")
-
-    def test_graph_canvas_visibility(self):
-        self.run_node("test_graph_canvas_visibility.js")
-
-    def test_panel_visibility(self):
-        self.run_node("test_panel_visibility.js")
-
-    def test_panel_arrangement(self):
-        self.run_node("test_panel_arrangement.js")
-
-    def test_marker_specs(self):
-        self.run_node("test_marker_specs.js")
-
-    def test_ambient_occlusion(self):
-        self.run_node("test_ambient_occlusion.js")
-
-    def test_marker_settings(self):
-        self.run_node("test_marker_settings.js")
-
-    def test_frame_axes(self):
-        self.run_node("test_frame_axes.js")
-
-    def test_camera_follow(self):
-        self.run_node("test_camera_follow.js")
-
-    def test_timeline_events(self):
-        self.run_node("test_timeline_events.js")
-
-    def test_response_util(self):
-        self.run_node("test_response_util.js")
-
-    def test_scene_context(self):
-        self.run_node("test_scene_context.js")
-
-    def test_scene_picker(self):
-        self.run_node("test_scene_picker.js")
-
-    def test_collada_mesh(self):
-        self.run_node("test_collada_mesh.js")
-
-    def test_environment_theme(self):
-        self.run_node("test_environment_theme.js")
-
-    def test_split_sizing(self):
-        self.run_node("test_split_sizing.js")
-
-    def test_split_resize(self):
-        self.run_node("test_split_resize.js")
-
-    def test_graph_gestures(self):
-        self.run_node("test_graph_gestures.js")
-
-    def test_joint_routing(self):
-        self.run_node("test_joint_routing.js")
-
-    def test_live_mode(self):
-        self.run_node("test_live_mode.js")
-
-    def test_recording_mode(self):
-        self.run_node("test_recording_mode.js")
-
-    def test_shape_specs(self):
-        self.run_node("test_shape_specs.js")
 
 
 # %% replayed statecharts
