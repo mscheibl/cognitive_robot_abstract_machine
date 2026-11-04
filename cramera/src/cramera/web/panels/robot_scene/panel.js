@@ -233,6 +233,24 @@ Panels.define('robot-scene', function (root, bus) {
   const objectIdByKey = {}, objectKeyById = {};
   const _objLoader = new THREE.STLLoader();   // no manager: for live/on-demand loads
 
+  // %% placeholder textures for bodies that come without one
+  const PLACEHOLDER_TEXTURE_SIZE = 256;   // pixels per side of a placeholder texture
+  const placeholderTextures = {};         // the textures drawn so far, by kind
+  //: the placeholder texture of ``kind``, drawn on a canvas the first time it is asked for
+  function placeholderTexture(kind) {
+    if (!placeholderTextures[kind]) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = PLACEHOLDER_TEXTURE_SIZE;
+      PlaceholderTextures.draw(kind, canvas.getContext('2d'), PLACEHOLDER_TEXTURE_SIZE);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.encoding = THREE.sRGBEncoding;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      placeholderTextures[kind] = texture;
+    }
+    return placeholderTextures[kind];
+  }
+
   // Add one observed object to the scene (bundle load or live update).
   // {id, key, color, meshUrl?, mtlUrl?, format?  |  box:[x,y,z]  |  shapes:[ShapeSpecs spec]}.
   // Any mesh format the vendored loaders support (stl/obj/dae) works; unknown →
@@ -251,6 +269,7 @@ Panels.define('robot-scene', function (root, bus) {
     });
     function place(content) {                  // content: Mesh or Object3D
       stripImportedLights(content);
+      PlaceholderTextures.applyTo(content, spec.id, placeholderTexture);
       content.traverse(function (c) {
         if (c.isMesh) {
           c.castShadow = true; c.receiveShadow = true;
@@ -313,6 +332,7 @@ Panels.define('robot-scene', function (root, bus) {
       };
       const finish = function (content3d) {
         stripImportedLights(content3d);
+        PlaceholderTextures.applyTo(content3d, spec.id, placeholderTexture);
         content3d.scale.set(shapeSpec.scale[0], shapeSpec.scale[1], shapeSpec.scale[2]);
         holder.add(content3d);
         needsRender = true;

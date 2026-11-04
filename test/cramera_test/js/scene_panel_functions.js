@@ -14,6 +14,9 @@ class ScenePanelFunctions {
       vm.runInContext(BrowserSource.read(path.join(webDirectory, 'core', filename)), this.scope);
     }
     Object.assign(this.scope, this.scope.window);
+    // Bodies keep the materials they are drawn with unless a test loads the module
+    // that dresses plain ones.
+    if (!this.scope.PlaceholderTextures) this.scope.PlaceholderTextures = {applyTo() {}};
     const panelPath = path.join(webDirectory, 'panels/robot_scene/panel.js');
     // Keep all sibling declarations together, including duplicate names, so their
     // hoisting matches the mounted panel. Single-line helpers are not needed here.
