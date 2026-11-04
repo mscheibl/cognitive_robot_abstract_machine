@@ -1409,8 +1409,7 @@ Panels.define('robot-scene', function (root, bus) {
       } else unknown = true;                   // an object the demo spawned mid-run
     }
     if (unknown) syncLiveObjects();            // fetch the catalog & spawn the newcomers
-    if (automaticCamera && robotModel && st.base) aimAutomaticCamera(st.base);
-    else if (follow && robotCenter(_target)) controls.target.lerp(_target, 0.08);
+    if (!automaticCamera && follow && robotCenter(_target)) controls.target.lerp(_target, 0.08);
     needsRender = true;
   }
   let livePolls = 0;
@@ -1420,6 +1419,8 @@ Panels.define('robot-scene', function (root, bus) {
       .then(function (st) {
         liveFails = 0;
         if (st.sequenceNumber !== lastSeq) { lastSeq = st.sequenceNumber; applyLive(st); }
+        // a robot standing still changes no state, yet the camera has to see it rest
+        if (automaticCamera && robotModel && st.base) aimAutomaticCamera(st.base);
       })
       .catch(function () { if (++liveFails > 30) setLive(false); });
   }
