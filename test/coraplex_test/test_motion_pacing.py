@@ -8,8 +8,11 @@ import pytest
 from coraplex.datastructures.enums import MotionPacing
 from coraplex.execution_environment import kinematically_simulated_robot
 from coraplex.plans.factories import sequential
+from coraplex.plans.plan_callbacks import PlanCallback
+from coraplex.plans.plan_node import MotionNode, PlanNode
 from coraplex.plans.underspecified import ActionTrial
 from coraplex.robot_plans.actions.core.robot_body import MoveTorsoAction
+from giskardpy.data_types.exceptions import NonPositiveRealTimeFactorError
 from giskardpy.executor import ScheduledPacer
 from semantic_digital_twin.datastructures.definitions import TorsoState
 
@@ -57,6 +60,36 @@ def real_time_pacer_observation(monkeypatch) -> ScheduledPacerObservation:
 
     monkeypatch.setattr(ScheduledPacer, "sleep", observed_sleep)
     return observation
+
+
+@dataclass
+class RealTimeFactorChange(PlanCallback):
+    """
+    Sets the real-time factor of the plan's context as the motion with a given index
+    starts.
+    """
+
+    motion_index: int
+    """
+    The index, in the order the motions start, of the motion that changes the factor.
+    """
+
+    real_time_factor: float
+    """
+    The factor the motion sets.
+    """
+
+    started_motions: int = field(default=0, init=False)
+    """
+    How many motions have started so far.
+    """
+
+    def on_start(self, node: PlanNode) -> None:
+        if not isinstance(node, MotionNode):
+            return
+        if self.started_motions == self.motion_index:
+            node.plan.context.real_time_factor = self.real_time_factor
+        self.started_motions += 1
 
 
 def _raise_torso(context) -> float:
@@ -144,3 +177,42 @@ def test_a_motion_paced_twice_as_fast_as_real_time_waits_half_a_control_period(
     assert real_time_pacer_observation.cycle_durations == pytest.approx(
         [period / 2.0 for period in real_time_pacer_observation.control_periods]
     )
+
+
+def test_a_real_time_factor_changed_while_motions_run_paces_the_cycles_after_it(
+    pr2_apartment_context, real_time_pacer_observation
+):
+    _, _, context = pr2_apartment_context
+    context.motion_pacing = MotionPacing.REAL_TIME
+    plan = sequential(
+        [MoveTorsoAction(TorsoState.LOW), MoveTorsoAction(TorsoState.HIGH)],
+        context=context,
+    ).plan
+    plan.node_callbacks.append(
+        RealTimeFactorChange(motion_index=1, real_time_factor=4.0)
+    )
+
+    with kinematically_simulated_robot:
+        plan.perform()
+
+    speedups = [
+        round(period / duration, 6)
+        for period, duration in zip(
+            real_time_pacer_observation.control_periods,
+            real_time_pacer_observation.cycle_durations,
+        )
+    ]
+    first_sped_up = speedups.index(4.0)
+    assert set(speedups[:first_sped_up]) == {1.0}
+    assert set(speedups[first_sped_up:]) == {4.0}
+
+
+def test_a_motion_paced_at_a_real_time_factor_of_zero_is_refused(
+    pr2_apartment_context,
+):
+    _, _, context = pr2_apartment_context
+    context.motion_pacing = MotionPacing.REAL_TIME
+    context.real_time_factor = 0.0
+
+    with pytest.raises(NonPositiveRealTimeFactorError):
+        _raise_torso(context)

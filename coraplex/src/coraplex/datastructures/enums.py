@@ -7,9 +7,11 @@ from __future__ import annotations
 from enum import Enum, auto, StrEnum
 from typing_extensions import TYPE_CHECKING
 
-from giskardpy.executor import NoPacing, Pacer, SimulationPacer
+from coraplex.datastructures.pacing import ContextSimulationPacer
+from giskardpy.executor import NoPacing, Pacer
 
 if TYPE_CHECKING:
+    from coraplex.datastructures.dataclasses import Context
     from coraplex.plans.plan import Plan
     from coraplex.plans.plan_node import PlanNode
 
@@ -119,14 +121,14 @@ class MotionPacing(Enum):
     move at, or that many times faster.
     """
 
-    def pacer(self, real_time_factor: float = 1.0) -> Pacer:
+    def pacer(self, context: Context) -> Pacer:
         """
-        :param real_time_factor: How many times faster than real time a motion paced in
-            real time runs.
+        :param context: The context whose real-time factor a motion paced in real time
+            follows while it runs.
         :return: A fresh pacer that holds a motion's control loop at this pace.
         """
         if self is MotionPacing.REAL_TIME:
-            return SimulationPacer(real_time_factor=real_time_factor)
+            return ContextSimulationPacer(context=context)
         return NoPacing()
 
 
